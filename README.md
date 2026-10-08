@@ -119,7 +119,7 @@ flowchart LR
 
 ## 🚀 Try it
 
-Today's slice runs locally: validate a spec, then render the GCP `0-org-setup` dataset from it. It needs Python 3.11+.
+Today's slice runs locally: validate a spec, render the GCP `0-org-setup` dataset from it, then check the output. It needs Python 3.11+.
 
 ```bash
 pip install -r tests/requirements.txt
@@ -128,6 +128,7 @@ S=.agents/skills/landing-zone/scripts/lzctl
 $S doctor                                                    # check dependencies
 $S spec validate evals/gcp/valid/standard.spec.json          # findings name the spec field to fix
 $S render evals/gcp/valid/standard.spec.json --out /tmp/lz   # FAST dataset + render-report.json
+$S check /tmp/lz                                             # integrity, upstream schemas, terraform fmt
 python -m pytest tests                                       # unit and render tests
 ```
 
@@ -135,10 +136,10 @@ python -m pytest tests                                       # unit and render t
 
 ## 🗺️ Roadmap
 
-- [x] **Design:** architecture, spec schema, cost model, 20 ADRs
+- [x] **Design:** architecture, spec schema, cost model, 21 ADRs
 - [x] **CI foundation:** OIDC per GitHub environment, Terraform state, Secret Manager + KMS, environment folders
 - [x] **Community:** license, contributing guide, issue forms, Discussions, protected `dev` branch
-- [ ] **P0, core + GCP:** spec schema ✓, `lzctl` (validate, render ✓; check, explain next), validator image, eval harness, FAST datasets (`0-org-setup` ✓; networking and security next)
+- [ ] **P0, core + GCP:** spec schema ✓, `lzctl` (validate, render, check ✓; explain next), validator image, eval harness, FAST datasets (`0-org-setup` ✓; networking and security next)
 - [ ] **P1, hosted agent:** ADK 2.0 workflow on Cloud Run, PR flow, first pilot
 - [ ] **P2, Azure, AWS, hosts:** AVM ALZ and Control Tower/AFT baselines, host compatibility matrix
 - [ ] **P3, OpenStack + hardening:** OpenStack modules, sandbox plans, security review

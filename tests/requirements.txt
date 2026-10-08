@@ -1,4 +1,4 @@
-# Runtime for lzctl: jsonschema, jinja2. Tests also need pyyaml and pytest.
+# Runtime for lzctl: jsonschema, jinja2, pyyaml. Tests also need pytest.
 # Run: pip install -r tests/requirements.txt && python -m pytest tests
 jsonschema>=4.21
 jinja2>=3.1

@@ -22,13 +22,14 @@ You collect requirements and produce a **landing zone spec** (JSON). You choose 
 3. **Write the spec** to a file, for example `landing-zone.spec.json`.
 4. **Validate:** run `scripts/lzctl spec validate landing-zone.spec.json`. Each finding names the spec field to change (`path`). Fix the spec and re-run. After 3 failed rounds, stop and show the findings to the user.
 5. **Render:** run `scripts/lzctl render landing-zone.spec.json --out <empty dir>`. Read `not_rendered_yet` in the output and tell the user which parts of their requirements are not in the configuration yet.
-6. **Confirm** the spec, the render report and the decision log with the user.
+6. **Check:** run `scripts/lzctl check <out dir>`. A finding on a rendered file means the spec or the templates are wrong, never the file: fix the spec and re-render, and never edit rendered files. Checks reported `not_applicable` have not run; say so rather than calling the output fully validated.
+7. **Confirm** the spec, the render report, the check result and the decision log with the user.
 
-Run `scripts/lzctl doctor` first if `lzctl` fails to start. It needs Python 3.11+ and the `jsonschema` and `jinja2` packages.
+Run `scripts/lzctl doctor` first if `lzctl` fails to start. It needs Python 3.11+ and the `jsonschema`, `jinja2` and `PyYAML` packages.
 
 ## Status
 
-Implemented: `lzctl spec validate`, `render` (GCP `0-org-setup` dataset, `starter` and `standard` profiles), `doctor`. Not yet: `check`, `explain`, networking and security datasets, the `regulated` profile (render refuses it). The output today is a validated spec and a rendered dataset, not a pull request.
+Implemented: `lzctl spec validate`, `render` (GCP `0-org-setup` dataset, `starter` and `standard` profiles), `check` (integrity, upstream schemas, `terraform fmt`), `doctor`. Not yet: `explain`, networking and security datasets, the `regulated` profile (render refuses it). The output today is a validated spec and a rendered dataset, not a pull request.
 
 ## References
 

@@ -60,7 +60,7 @@ Until `main` exists, `dev` is both trunk and the only deploy target. Promotion t
 - **CI: Docs:** markdown lint, link check, and the repo's content rules.
 - **CI: Workflows:** actionlint, zizmor (workflow security audit) and the SHA-pinning check.
 - **CI: Terraform:** `terraform fmt -check`, `validate`, tflint, trivy, conftest (including the ADR-012 tag rule), then `plan`, posted as a PR comment.
-- **CI: Skill:** `pip install -r tests/requirements.txt && python -m pytest tests`: `lzctl` unit tests, golden render hashes (byte-identical output), rendered YAML checked against FAST's factory schemas, and the vendored-upstream manifest check. Run it on Python 3.11 and 3.13, because output must not depend on the interpreter.
+- **CI: Skill:** `pip install -r tests/requirements.txt && python -m pytest tests`: `lzctl` unit tests, golden render hashes (byte-identical output), rendered YAML checked against FAST's factory schemas, `lzctl check` on every golden render, and the vendored-upstream manifest check. Run it on Python 3.11 and 3.13, because output must not depend on the interpreter.
 - **CI: Evals smoke:** the 8-scenario subset from DESIGN.md. **Ops: Evals full** runs all 25 scenarios x 4 clouds weekly, about $65 per run.
 
 ## Naming conventions

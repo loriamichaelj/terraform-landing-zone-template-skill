@@ -129,7 +129,7 @@ templates/<cloud>/fast-<tag>/   # per baseline (ADR-020):
   overlay/                #   Jinja templates that replace or add spec-driven files
   MANIFEST.json           #   tag, commit and SHA-256 of every upstream file
 policies/<cloud>/         # Rego rules used by conftest (not written yet)
-scripts/lzctl             # spec validate, render, doctor built; check, explain next
+scripts/lzctl             # spec validate, render, check, doctor built; explain next
 ```
 
 Golden specs and render hashes live outside the package, in the repo's `evals/` (see Repository layout), so the skill ships without test data.
@@ -166,7 +166,7 @@ The LLM decides values; templates decide structure. Generated output is limited 
 
 - One pinned baseline per cloud per skill version (see Landing zone template configurations).
 - The spec schema is meant to be generated from the baseline's own JSON schemas where they exist (Fabric FAST ships schemas for every factory file) and from module `variables.tf` otherwise, so hallucinated inputs fail schema validation before rendering. Today it is handwritten, with unknown fields rejected; generation is planned.
-- Rendered output is validated again against the upstream schemas, which catches template bugs as well as spec bugs. Today the test suite does this for every rendered YAML file; `lzctl check` will do it at run time.
+- Rendered output is validated again against the upstream schemas, which catches template bugs as well as spec bugs. The test suite does this for every rendered YAML file, and `lzctl check` does it at run time (ADR-021).
 - Templates are plain Jinja with no LLM in the render path, which makes rendering deterministic and unit-testable. For GCP the templates are overlays on a vendored copy of the pinned FAST dataset (ADR-020).
 - Bumping the baseline version requires a skill release and a full eval run.
 
@@ -253,7 +253,7 @@ One skill directory runs unchanged in Codex, Gemini CLI and Grok Build, because 
 | --- | --- |
 | `lzctl spec validate` | Checks the spec against the per-cloud JSON schema |
 | `lzctl render <spec> --out <dir>` | Renders a spec to YAML datasets and tfvars, plus a report with file hashes and the fields not rendered yet |
-| `lzctl check` | Runs fmt, validate, tflint, trivy, conftest and upstream schema checks; emits JSON findings |
+| `lzctl check <dir>` | Verifies a rendered directory and emits JSON findings. Today: file integrity against the render report, upstream schema checks and `terraform fmt`. Validate, tflint, trivy and conftest are reported `not_applicable` until HCL and a policy pack are rendered (ADR-021) |
 | `lzctl explain <finding>` | Maps a finding back to the spec field that caused it |
 | `lzctl doctor` | Checks runtime dependencies and, for OpenStack, discovers available services |
 
@@ -376,7 +376,7 @@ docs/                 # design, ADRs, CI/CD strategy, runbooks
 .github/              # workflows, issue forms, PR template, CODEOWNERS, Dependabot
 ```
 
-Built so far: `docs/`, `.github/` and the community files (LICENSE, CONTRIBUTING, SECURITY, SUPPORT, CODE_OF_CONDUCT), plus the first P0 slices: the skill package with the core and GCP spec schemas, `lzctl spec validate`, `render` and `doctor`, the vendored FAST v59.0.0 `classic` dataset with overlay templates (ADR-020), the `.gemini/skills` symlink, golden GCP specs and render hashes in `evals/`, and tests in `tests/`. `render` covers the `0-org-setup` dataset only. `lzctl check` and `explain`, the networking and security datasets, policies, `agent/`, `validator/` and `infra/` come next, with P0 and P1.
+Built so far: `docs/`, `.github/` and the community files (LICENSE, CONTRIBUTING, SECURITY, SUPPORT, CODE_OF_CONDUCT), plus the first P0 slices: the skill package with the core and GCP spec schemas, `lzctl spec validate`, `render`, `check` and `doctor`, the vendored FAST v59.0.0 `classic` dataset with overlay templates (ADR-020), the `.gemini/skills` symlink, golden GCP specs and render hashes in `evals/`, and tests in `tests/`. `render` covers the `0-org-setup` dataset only. `lzctl explain`, the networking and security datasets, policies, `agent/`, `validator/` and `infra/` come next, with P0 and P1.
 
 **Pipeline** (full strategy, environments and naming in [CICD.md](CICD.md))
 

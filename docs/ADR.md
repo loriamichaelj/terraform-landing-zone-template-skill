@@ -28,6 +28,7 @@ Statuses: **Proposed** (in the design, awaiting reviewer sign-off) · **Accepted
 | [018](#adr-018-dev-accepts-changes-only-by-pull-request-except-the-owner) | `dev` accepts changes only by pull request, except the owner | Accepted | 2026-10-07 |
 | [019](#adr-019-every-taggable-resource-carries-both-the-name-and-environment-tags) | Every taggable resource carries both the name and environment tags | Accepted | 2026-10-07 |
 | [020](#adr-020-gcp-output-is-a-vendored-fast-dataset-plus-overlay-templates) | GCP output is a vendored FAST dataset plus overlay templates | Accepted | 2026-10-07 |
+| [021](#adr-021-lzctl-check-verifies-rendered-output-and-says-which-checks-did-not-run) | `lzctl check` verifies rendered output and says which checks did not run | Accepted | 2026-10-08 |
 
 ---
 
@@ -310,6 +311,29 @@ A ruleset was used rather than classic branch protection: rulesets are GitHub's 
 - `classic` defines only `development` and `production`. `stage` is supported by adding a `staging` tag value and stage folders in the overlay, which is our extension rather than upstream's.
 - `classic` creates an organization tag key named `environment`. Applying a rendered landing zone to an organization that already has such a key (this repo's own org does, ADR-017) needs that key imported first. The agent never applies, so this only affects the team applying the PR.
 - Not rendered yet: `2-networking`, `2-security`, `1-vpcsc`, the hardened dataset, and the extra regions, CIDR plan and network groups. They are listed in the report for every render.
+
+
+---
+
+## ADR-021: `lzctl check` verifies rendered output and says which checks did not run
+
+**Status:** Accepted · 2026-10-08 · Implements the `lzctl check` row of DESIGN.md
+
+**Context.** DESIGN.md promised that every render is checked with fmt, validate, tflint, trivy, conftest and the upstream schemas before a human sees it (F5). The GCP slice renders FAST YAML datasets and one tfvars file, so most of those tools have nothing to inspect. A check that reports "passed" for work it didn't do would give reviewers false confidence, which the design names as the largest risk. The rendered directory is also untrusted input to the validator: it may come from a PR branch or another host.
+
+**Decision.**
+- `lzctl check <dir>` takes a directory written by `lzctl render` and emits JSON `{ok, checks, findings}`. Each finding has the same `rule`, `path`, `message` shape as `spec validate`, with rules under `check.*`. Exit 0 is clean, 1 is findings, 2 is a directory that can't be checked.
+- **Integrity.** Every file must match `render-report.json`: no missing, extra or modified files, a recomputed `output_hash`, and no symlinks (never followed). Rendered files are never edited by hand (SKILL.md); this makes a hand edit fail rather than slip through.
+- **Upstream schemas.** Every YAML file that declares a FAST schema is validated against the vendored copy, and the vendored copy is first verified against `MANIFEST.json`. A file that declares a schema we don't vendor is a finding. The report's baseline tag must match the vendored one. This catches an edited file whose report was re-signed, which integrity alone can't.
+- **`terraform fmt -check`** runs when `terraform` or `tofu` is installed, and is `skipped` otherwise.
+- `terraform validate`, `tflint`, `trivy` and `conftest` are reported `not_applicable` with a reason: no HCL is rendered and there is no policy pack. They become real checks when the networking and security datasets and the Rego policies land, and the list lives in one constant (`NOT_APPLICABLE`).
+- PyYAML becomes a runtime dependency of `lzctl` (it was test-only), and `lzctl doctor` checks for it.
+
+**Consequences.**
+- Reviewers and the hosted agent can tell "passed" from "did not run" from the `status` of each check. A skill or agent must not describe the output as fully validated while any check is `not_applicable` or `skipped`.
+- The check needs no network and no model, so it can run in the validator job (ADR-008) and gives the same result on every host.
+- Integrity detects change, not origin: someone who edits files and re-signs the report passes integrity, and is caught only if the edit breaks a schema. Provenance of the render (who ran it, which spec) belongs to the PR flow in P1.
+- Findings point at rendered files, not spec fields. `lzctl explain` (next) will map them back.
 
 ---
 

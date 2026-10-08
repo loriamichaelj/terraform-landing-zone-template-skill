@@ -4,10 +4,11 @@
 Commands:
   spec validate <spec.json>          Check a spec against the core and per-cloud schemas.
   render <spec.json> --out <dir>     Render a valid spec into FAST configuration data (GCP).
+  check <dir>                        Verify a rendered directory: integrity, upstream schemas, formatting.
   doctor                             Check runtime dependencies.
 
 Exit codes: 0 clean, 1 findings or render refused, 2 usage or environment error.
-Requires Python 3.11+, jsonschema and jinja2.
+Requires Python 3.11+, jsonschema, jinja2 and PyYAML.
 """
 
 from __future__ import annotations
@@ -16,7 +17,10 @@ import argparse
 import hashlib
 import ipaddress
 import json
+import os
+import re
 import shutil
+import subprocess
 import sys
 from importlib import metadata
 from pathlib import Path
@@ -54,6 +58,17 @@ DEFERRED_GCP = {
     "extensions.gcp.audit_sink": "additional log sinks",
 }
 
+REPORT_NAME = "render-report.json"
+SCHEMA_DECLARATION = re.compile(rb"yaml-language-server: \$schema=\S*?([\w-]+\.schema\.json)")
+
+# Checks the design calls for that have nothing to run on yet. Reported, never counted as passed.
+NOT_APPLICABLE = {
+    "terraform-validate": "needs the FAST stage module, which is not vendored; the output is data files only",
+    "tflint": "no HCL is rendered yet",
+    "trivy": "no HCL is rendered yet",
+    "conftest": "no policy pack yet",
+}
+
 TOOLS = {
     "terraform": "fmt and validate (OpenTofu also works)",
     "tflint": "lint",
@@ -64,6 +79,10 @@ TOOLS = {
 
 class RenderError(Exception):
     """The spec cannot be rendered; the message says why."""
+
+
+class CheckError(Exception):
+    """The directory cannot be checked at all; the message says why."""
 
 
 def _fail(message: str) -> int:
@@ -160,6 +179,10 @@ def validate_spec(spec: object) -> list[dict]:
 
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _output_hash(digests: dict[str, str]) -> str:
+    return _sha256("".join(f"{path}\0{digest}\n" for path, digest in sorted(digests.items())).encode("utf-8"))
 
 
 def _present(spec: dict, dotted: str) -> bool:
@@ -261,7 +284,7 @@ def render_spec(spec: dict) -> tuple[dict[str, bytes], dict]:
     )
 
     digests = {path: _sha256(data) for path, data in sorted(output.items())}
-    output_hash = _sha256("".join(f"{path}\0{digest}\n" for path, digest in digests.items()).encode("utf-8"))
+    output_hash = _output_hash(digests)
     deferred = {field: stage for field, stage in DEFERRED_GCP.items() if _present(spec, field)}
     extra_regions = spec["network"]["regions"][1:]
     if extra_regions:
@@ -308,6 +331,173 @@ def cmd_render(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+# --- check ------------------------------------------------------------------
+
+
+def _check_result(name: str, status: str, detail: str = "") -> dict:
+    return {"name": name, "status": status, "detail": detail}
+
+
+def _walk_files(directory: Path) -> tuple[dict[str, Path], list[str]]:
+    """Regular files by relative path, and symlinks (never followed)."""
+    files: dict[str, Path] = {}
+    links: list[str] = []
+    for root, dirs, names in os.walk(directory, followlinks=False):
+        for name in sorted(dirs + names):
+            path = Path(root) / name
+            if path.is_symlink():
+                links.append(path.relative_to(directory).as_posix())
+            elif path.is_file():
+                files[path.relative_to(directory).as_posix()] = path
+    return files, sorted(links)
+
+
+def _load_report(directory: Path) -> dict:
+    path = directory / REPORT_NAME
+    if not path.is_file():
+        raise CheckError(f"{directory} has no {REPORT_NAME}; render into it first")
+    try:
+        report = _load_json(path)
+    except json.JSONDecodeError as exc:
+        raise CheckError(f"{path} is not valid JSON: {exc}") from exc
+    files = report.get("files") if isinstance(report, dict) else None
+    baseline = report.get("baseline") if isinstance(report, dict) else None
+    if (
+        not isinstance(files, dict)
+        or not all(isinstance(k, str) and isinstance(v, str) for k, v in files.items())
+        or not isinstance(report.get("output_hash"), str)
+        or not isinstance(baseline, dict)
+        or not isinstance(baseline.get("cloud"), str)
+    ):
+        raise CheckError(f"{path} is not a render report")
+    return report
+
+
+def _integrity_findings(report: dict, on_disk: dict[str, Path], links: list[str]) -> list[dict]:
+    findings = [_finding("check.integrity.symlink", link, "symbolic links are not allowed in rendered output") for link in links]
+    expected = report["files"]
+    for relative in sorted(set(expected) - set(on_disk)):
+        findings.append(_finding("check.integrity.missing", relative, "listed in the render report but not on disk"))
+    for relative in sorted(set(on_disk) - set(expected) - {REPORT_NAME}):
+        findings.append(_finding("check.integrity.extra", relative, "on disk but not in the render report; only `lzctl render` may create files"))
+    for relative in sorted(set(expected) & set(on_disk)):
+        if _sha256(on_disk[relative].read_bytes()) != expected[relative]:
+            findings.append(_finding("check.integrity.modified", relative, "differs from the render report; edit the spec and re-render instead"))
+    if _output_hash(expected) != report["output_hash"]:
+        findings.append(_finding("check.integrity.output_hash", REPORT_NAME, "output_hash does not match the listed file digests"))
+    return findings
+
+
+def _schema_check(report: dict, on_disk: dict[str, Path]) -> tuple[list[dict], int, int]:
+    """Validate YAML against the vendored upstream schemas. Returns (findings, validated, undeclared)."""
+    try:
+        import yaml
+        from jsonschema import validators
+    except ImportError as exc:
+        raise CheckError("jsonschema or PyYAML is not installed; run `lzctl doctor`") from exc
+
+    cloud = report["baseline"]["cloud"]
+    try:
+        manifest, root = _load_baseline(cloud)
+    except RenderError as exc:
+        raise CheckError(str(exc)) from exc
+    findings = []
+    if report["baseline"].get("tag") != manifest["tag"]:
+        findings.append(_finding("check.baseline.mismatch", REPORT_NAME,
+                                 f"rendered with {report['baseline'].get('tag')}, but this skill vendors {manifest['tag']}"))
+
+    schema_dir = root / "upstream" / "schemas"
+    cache: dict[str, object] = {}
+    validated = undeclared = 0
+    for relative, path in sorted(on_disk.items()):
+        if not relative.endswith((".yaml", ".yml")):
+            continue
+        data = path.read_bytes()
+        try:
+            # Some upstream files hold only comments; an empty factory file means an empty map.
+            document = yaml.safe_load(data) or {}
+        except yaml.YAMLError as exc:
+            findings.append(_finding("check.yaml.parse", relative, str(exc).replace("\n", " ")[:160]))
+            continue
+        declared = SCHEMA_DECLARATION.search(data)
+        if declared is None:
+            undeclared += 1
+            continue
+        name = declared.group(1).decode()
+        if name not in cache:
+            schema_path = schema_dir / name
+            cache[name] = _load_json(schema_path) if schema_path.is_file() else None
+        schema = cache[name]
+        if schema is None:
+            findings.append(_finding("check.schema.unknown", relative, f"declares {name}, which is not among the vendored schemas"))
+            continue
+        validated += 1
+        for error in sorted(validators.validator_for(schema)(schema).iter_errors(document), key=lambda e: _dotted(e.absolute_path)):
+            message = error.message if len(error.message) <= 160 else error.message[:157] + "..."
+            findings.append(_finding(f"check.schema.{error.validator}", relative, f"{_dotted(error.absolute_path)}: {message}"))
+    return findings, validated, undeclared
+
+
+def _terraform_fmt(directory: Path) -> tuple[dict, list[dict]]:
+    exe = shutil.which("terraform") or shutil.which("tofu")
+    if exe is None:
+        return _check_result("terraform-fmt", "skipped", "terraform or tofu is not installed"), []
+    env = {**os.environ, "TF_IN_AUTOMATION": "1", "CHECKPOINT_DISABLE": "1"}
+    try:
+        proc = subprocess.run([exe, "fmt", "-check", "-recursive", "-no-color", "."], cwd=directory,
+                              capture_output=True, text=True, timeout=60, env=env, check=False)
+    except subprocess.TimeoutExpired:
+        return _check_result("terraform-fmt", "failed", "timed out after 60s"), [_finding("check.terraform.fmt", ".", "terraform fmt timed out")]
+    if proc.returncode == 0:
+        return _check_result("terraform-fmt", "passed"), []
+    if proc.returncode == 3:
+        files = sorted(line.strip() for line in proc.stdout.splitlines() if line.strip())
+        return (_check_result("terraform-fmt", "failed", f"{len(files)} file(s) not formatted"),
+                [_finding("check.terraform.fmt", f, "not canonically formatted") for f in files])
+    detail = (proc.stderr.strip().splitlines() or ["terraform fmt failed"])[0][:160]
+    return _check_result("terraform-fmt", "failed", detail), [_finding("check.terraform.fmt", ".", detail)]
+
+
+def check_output(directory: Path) -> tuple[list[dict], list[dict]]:
+    """Verify a rendered directory. Returns (checks, findings); findings is empty when clean."""
+    report = _load_report(directory)
+    on_disk, links = _walk_files(directory)
+
+    integrity = _integrity_findings(report, on_disk, links)
+    checks = [_check_result("integrity", "failed" if integrity else "passed",
+                            f"{len(integrity)} finding(s)" if integrity else f"{len(report['files'])} files match the render report")]
+
+    schema, validated, undeclared = _schema_check(report, on_disk)
+    checks.append(_check_result("upstream-schemas", "failed" if schema else "passed",
+                                f"{validated} YAML files validated, {undeclared} declare no schema"))
+
+    fmt_check, fmt = _terraform_fmt(directory)
+    checks.append(fmt_check)
+    checks += [_check_result(name, "not_applicable", reason) for name, reason in NOT_APPLICABLE.items()]
+
+    findings = sorted(integrity + schema + fmt, key=lambda f: (f["path"], f["rule"], f["message"]))
+    return checks, findings
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    directory = Path(args.dir)
+    if not directory.is_dir():
+        return _fail(f"{directory} is not a directory")
+    try:
+        checks, findings = check_output(directory)
+    except CheckError as exc:
+        return _fail(str(exc))
+
+    if args.format == "json":
+        print(json.dumps({"ok": not findings, "checks": checks, "findings": findings}, indent=2, sort_keys=True))
+    else:
+        for c in checks:
+            print(f"{c['status']:15} {c['name']}" + (f": {c['detail']}" if c["detail"] else ""))
+        for f in findings:
+            print(f"{f['path']}: {f['message']} [{f['rule']}]")
+    return EXIT_FINDINGS if findings else EXIT_OK
+
+
 # --- other commands ---------------------------------------------------------
 
 
@@ -339,7 +529,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     checks = []
     py_ok = sys.version_info >= (3, 11)
     checks.append({"name": "python>=3.11", "ok": py_ok, "required": True, "detail": sys.version.split()[0]})
-    for module, pip_name in (("jsonschema", "jsonschema"), ("jinja2", "jinja2")):
+    for module, pip_name in (("jsonschema", "jsonschema"), ("jinja2", "jinja2"), ("yaml", "PyYAML")):
         try:
             __import__(module)
             checks.append({"name": module, "ok": True, "required": True, "detail": metadata.version(pip_name)})
@@ -373,6 +563,11 @@ def build_parser() -> argparse.ArgumentParser:
     render.add_argument("spec", help="path to the spec JSON file")
     render.add_argument("--out", required=True, help="output directory (must be empty or absent)")
     render.set_defaults(func=cmd_render)
+
+    check = sub.add_parser("check", help="verify a rendered directory")
+    check.add_argument("dir", help="directory written by `lzctl render`")
+    check.add_argument("--format", choices=["json", "text"], default="json")
+    check.set_defaults(func=cmd_check)
 
     doctor = sub.add_parser("doctor", help="check runtime dependencies")
     doctor.add_argument("--format", choices=["json", "text"], default="json")

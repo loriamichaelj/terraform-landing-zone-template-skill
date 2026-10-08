@@ -79,7 +79,7 @@ Contributions are Markdown, workflow YAML, and now the skill and `lzctl`. Useful
 - [actionlint](https://github.com/rhysd/actionlint) for workflow changes
 - A Markdown previewer that renders Mermaid (for the architecture diagram)
 
-`lzctl doctor` checks the runtime dependencies. Terraform 1.16 (or OpenTofu), tflint, trivy and conftest are optional today and become required when `lzctl check` lands.
+`lzctl doctor` checks the runtime dependencies. Terraform 1.16 (or OpenTofu), tflint, trivy and conftest are optional today and become required as `lzctl check` gains work for them: `check` runs `terraform fmt` when it is installed, and reports the others `not_applicable` until HCL and policies are rendered.
 
 **Changing the skill:**
 

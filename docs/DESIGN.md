@@ -129,7 +129,7 @@ templates/<cloud>/fast-<tag>/   # per baseline (ADR-020):
   overlay/                #   Jinja templates that replace or add spec-driven files
   MANIFEST.json           #   tag, commit and SHA-256 of every upstream file
 policies/<cloud>/         # Rego rules used by conftest (not written yet)
-scripts/lzctl             # spec validate, render, check, doctor built; explain next
+scripts/lzctl             # spec validate, render, check, explain, doctor
 ```
 
 Golden specs and render hashes live outside the package, in the repo's `evals/` (see Repository layout), so the skill ships without test data.
@@ -254,7 +254,7 @@ One skill directory runs unchanged in Codex, Gemini CLI and Grok Build, because 
 | `lzctl spec validate` | Checks the spec against the per-cloud JSON schema |
 | `lzctl render <spec> --out <dir>` | Renders a spec to YAML datasets and tfvars, plus a report with file hashes and the fields not rendered yet |
 | `lzctl check <dir>` | Verifies a rendered directory and emits JSON findings. Today: file integrity against the render report, upstream schema checks and `terraform fmt`. Trivy and Checkov scan rendered `.tf` files and are `not_applicable` until some exist (ADR-022). Validate, tflint and conftest are `not_applicable` until HCL and a policy pack are rendered (ADR-021) |
-| `lzctl explain <finding>` | Maps a finding back to the spec field that caused it |
+| `lzctl explain [dir] [--findings file]` | Maps findings from `check` or `spec validate` back to the spec fields that caused them, using the `sources` map in the render report. A finding on a hand-edited file is blamed on the edit, and one on an untouched upstream file is not blamed on the spec (ADR-023) |
 | `lzctl doctor` | Checks runtime dependencies and, for OpenStack, discovers available services |
 
 The Cloud Run ADK agent becomes one more host: it calls the same `lzctl`, so hosted and local runs produce byte-identical output for the same spec.
@@ -376,7 +376,7 @@ docs/                 # design, ADRs, CI/CD strategy, runbooks
 .github/              # workflows, issue forms, PR template, CODEOWNERS, Dependabot
 ```
 
-Built so far: `docs/`, `.github/` and the community files (LICENSE, CONTRIBUTING, SECURITY, SUPPORT, CODE_OF_CONDUCT), plus the first P0 slices: the skill package with the core and GCP spec schemas, `lzctl spec validate`, `render`, `check` and `doctor`, the vendored FAST v59.0.0 `classic` dataset with overlay templates (ADR-020), the `.gemini/skills` symlink, golden GCP specs and render hashes in `evals/`, and tests in `tests/`. `render` covers the `0-org-setup` dataset only. `lzctl explain`, the networking and security datasets, policies, `agent/`, `validator/` and `infra/` come next, with P0 and P1.
+Built so far: `docs/`, `.github/` and the community files (LICENSE, CONTRIBUTING, SECURITY, SUPPORT, CODE_OF_CONDUCT), plus the first P0 slices: the skill package with the core and GCP spec schemas, `lzctl spec validate`, `render`, `check`, `explain` and `doctor`, the vendored FAST v59.0.0 `classic` dataset with overlay templates (ADR-020), the `.gemini/skills` symlink, golden GCP specs and render hashes in `evals/`, and tests in `tests/`. `render` covers the `0-org-setup` dataset only. The networking and security datasets, policies, `agent/`, `validator/` and `infra/` come next, with P0 and P1.
 
 **Pipeline** (full strategy, environments and naming in [CICD.md](CICD.md))
 

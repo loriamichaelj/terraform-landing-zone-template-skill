@@ -5,6 +5,7 @@ Commands:
   spec validate <spec.json>          Check a spec against the core and per-cloud schemas.
   render <spec.json> --out <dir>     Render a valid spec into FAST configuration data (GCP).
   check <dir>                        Verify a rendered directory: integrity, upstream schemas, formatting, scans.
+  explain [dir] [--findings <file>]  Map findings back to the spec fields that caused them.
   doctor                             Check runtime dependencies.
 
 Exit codes: 0 clean, 1 findings or render refused, 2 usage or environment error.
@@ -253,15 +254,23 @@ def render_spec(spec: dict) -> tuple[dict[str, bytes], dict]:
     selected = [name for name in ENVIRONMENTS if name in spec["hierarchy"]["environments"]]
     envs = [ENVIRONMENTS[name] for name in selected]
 
+    # Which spec fields drive each generated file; `lzctl explain` reads this back.
+    sources: dict[str, list[str]] = {}
+
+    def driven_by(path: str, *fields: str) -> None:
+        sources[dataset_prefix + path] = sorted(fields)
+
     # Environment folders: drop the dataset's own, then render the selected ones.
     for path in [p for p in files if p.startswith(("folders/networking/", "folders/security/")) and p.count("/") == 3]:
         del files[path]
     for name in selected:
         for kind in ("networking", "security"):
             files[f"folders/{kind}/{name}/.config.yaml"] = render(f"folder-{kind}-env.yaml.j2", env=ENVIRONMENTS[name])
+            driven_by(f"folders/{kind}/{name}/.config.yaml", "hierarchy.environments")
 
     for unit in sorted(spec["hierarchy"].get("business_units", [])):
         files[f"folders/teams/{unit}/.config.yaml"] = render("folder-team.yaml.j2", name=unit)
+        driven_by(f"folders/teams/{unit}/.config.yaml", "hierarchy.business_units")
 
     logging = spec["logging"]
     ext = spec["extensions"]["gcp"]
@@ -282,6 +291,12 @@ def render_spec(spec: dict) -> tuple[dict[str, bytes], dict]:
         primary_region=spec["network"]["regions"][0],
     )
 
+    driven_by("organization/tags/environment.yaml", "hierarchy.environments")
+    driven_by("projects/core/log-0.yaml", "logging.audit_destination", "logging.retention_days")
+    driven_by("defaults.yaml", "extensions.gcp.customer_id", "extensions.gcp.prefix", "iam.groups.org_admins",
+              "network.regions", "organization.billing_ref", "organization.domain", "organization.id")
+    sources["0-org-setup.auto.tfvars"] = ["target.baseline_version"]
+
     output = {dataset_prefix + path: data for path, data in files.items()}
     output["0-org-setup.auto.tfvars"] = render(
         "factories.tfvars.j2", baseline_tag=manifest["tag"], dataset_name=baseline["output_dataset"]
@@ -298,6 +313,7 @@ def render_spec(spec: dict) -> tuple[dict[str, bytes], dict]:
         "output_hash": output_hash,
         "files": digests,
         "not_rendered_yet": dict(sorted(deferred.items())),
+        "sources": dict(sorted(sources.items())),
     }
     return output, report
 
@@ -588,6 +604,87 @@ def cmd_check(args: argparse.Namespace) -> int:
     return EXIT_FINDINGS if findings else EXIT_OK
 
 
+# --- explain ----------------------------------------------------------------
+
+
+def _cause(finding: dict, report: dict | None) -> dict:
+    """Where a finding comes from: the spec field(s) to change, or why the spec is not the cause."""
+    rule, path = finding["rule"], finding["path"]
+    if not rule.startswith("check."):
+        # A `spec validate` finding: its path already is the spec field.
+        return {"kind": "spec", "spec_fields": [path], "advice": "Change this field in the spec."}
+    if rule.startswith("check.integrity."):
+        return {"kind": "integrity", "spec_fields": [],
+                "advice": "Rendered files are never edited by hand. Re-run `lzctl render` into an empty directory."}
+    if rule == "check.baseline.mismatch":
+        return {"kind": "baseline", "spec_fields": ["target.baseline_version"],
+                "advice": "The output was rendered with a different baseline than this skill vendors. Re-render with this skill version."}
+    if rule == "check.hcl.suppression":
+        return {"kind": "template", "spec_fields": [],
+                "advice": "Rendered HCL must not carry scanner suppressions. This is a template bug or a hand edit: re-render, and report the template if it persists."}
+    if report is None:
+        return {"kind": "unknown", "spec_fields": [], "advice": "Pass the rendered directory so the finding can be traced to the spec."}
+    sources = report.get("sources")
+    fields = sources.get(path) if isinstance(sources, dict) else None
+    if isinstance(fields, list) and fields and all(isinstance(f, str) for f in fields):
+        return {"kind": "spec", "spec_fields": sorted(fields),
+                "advice": "Change one of these spec fields. If every value is valid, the template is wrong: report it as a bug."}
+    if path in report["files"]:
+        return {"kind": "vendored", "spec_fields": [],
+                "advice": "Unmodified upstream baseline file; no spec field drives it. The baseline or its vendored copy is at fault: do not edit it."}
+    return {"kind": "unknown", "spec_fields": [], "advice": "This path is not in the render report."}
+
+
+def explain_findings(findings: list[dict], report: dict | None) -> list[dict]:
+    # A file changed after rendering explains every other finding on it; blaming the spec would mislead.
+    altered = {f["path"] for f in findings if f["rule"].startswith("check.integrity.") and f["rule"] != "check.integrity.output_hash"}
+    explained = []
+    for finding in findings:
+        if finding["rule"].startswith("check.") and not finding["rule"].startswith("check.integrity.") and finding["path"] in altered:
+            cause = {"kind": "integrity", "spec_fields": [],
+                     "advice": "This file was changed after rendering, which explains this finding. Re-run `lzctl render` into an empty directory first."}
+        else:
+            cause = _cause(finding, report)
+        explained.append({**finding, "cause": cause})
+    return explained
+
+
+def _read_findings(source: str) -> list[dict]:
+    try:
+        raw = sys.stdin.read() if source == "-" else Path(source).read_text(encoding="utf-8")
+        data = json.loads(raw)
+    except FileNotFoundError as exc:
+        raise CheckError(f"{source} not found") from exc
+    except json.JSONDecodeError as exc:
+        raise CheckError(f"{source} is not valid JSON: {exc}") from exc
+    findings = data.get("findings") if isinstance(data, dict) else data
+    if not isinstance(findings, list) or not all(
+        isinstance(f, dict) and all(isinstance(f.get(k), str) for k in ("rule", "path", "message")) for f in findings
+    ):
+        raise CheckError(f"{source} must hold findings (rule, path, message) or a `check` or `spec validate` result")
+    return findings
+
+
+def cmd_explain(args: argparse.Namespace) -> int:
+    directory = Path(args.dir) if args.dir else None
+    try:
+        report = None
+        if directory is not None:
+            if not directory.is_dir():
+                raise CheckError(f"{directory} is not a directory")
+            report = _load_report(directory)
+        if args.findings:
+            findings = _read_findings(args.findings)
+        elif directory is not None:
+            findings = check_output(directory)[1]
+        else:
+            raise CheckError("give a rendered directory to check, or --findings <file|->")
+    except CheckError as exc:
+        return _fail(str(exc))
+    print(json.dumps({"explained": explain_findings(findings, report)}, indent=2, sort_keys=True))
+    return EXIT_OK
+
+
 # --- other commands ---------------------------------------------------------
 
 
@@ -658,6 +755,11 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("dir", help="directory written by `lzctl render`")
     check.add_argument("--format", choices=["json", "text"], default="json")
     check.set_defaults(func=cmd_check)
+
+    explain = sub.add_parser("explain", help="map findings back to spec fields")
+    explain.add_argument("dir", nargs="?", help="rendered directory; without --findings it is checked first")
+    explain.add_argument("--findings", help="JSON from `check` or `spec validate` ('-' for stdin)")
+    explain.set_defaults(func=cmd_explain)
 
     doctor = sub.add_parser("doctor", help="check runtime dependencies")
     doctor.add_argument("--format", choices=["json", "text"], default="json")

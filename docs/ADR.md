@@ -30,6 +30,7 @@ Statuses: **Proposed** (in the design, awaiting reviewer sign-off) · **Accepted
 | [020](#adr-020-gcp-output-is-a-vendored-fast-dataset-plus-overlay-templates) | GCP output is a vendored FAST dataset plus overlay templates | Accepted | 2026-10-07 |
 | [021](#adr-021-lzctl-check-verifies-rendered-output-and-says-which-checks-did-not-run) | `lzctl check` verifies rendered output and says which checks did not run | Accepted | 2026-10-08 |
 | [022](#adr-022-trivy-and-checkov-both-scan-rendered-hcl) | Trivy and Checkov both scan rendered HCL | Accepted | 2026-10-08 |
+| [023](#adr-023-the-render-report-records-which-spec-fields-drive-each-file-and-lzctl-explain-reads-it) | The render report records which spec fields drive each file, and `lzctl explain` reads it | Accepted | 2026-10-08 |
 
 ---
 
@@ -356,6 +357,27 @@ A ruleset was used rather than classic branch protection: rulesets are GitHub's 
 - Nothing new runs on today's GCP output, and the report says so. The scanners start working when the networking and security slices emit HCL, or when an `infra/` render is added, with no further `lzctl` change.
 - Two scanners mean two sets of false positives and two version pins in the validator image (ADR-008). If one proves redundant on real HCL, drop it by superseding this ADR, informed by the findings each one actually produced.
 - Excluding a finding that is a known false positive needs a design decision (an allowlist in the spec or the policy pack, reviewed in the PR), not a code comment. No allowlist exists yet.
+
+
+---
+
+## ADR-023: The render report records which spec fields drive each file, and `lzctl explain` reads it
+
+**Status:** Accepted · 2026-10-08 · Implements the `lzctl explain` row of DESIGN.md
+
+**Context.** The review step has the model map each finding back to the spec field that caused it (DESIGN.md, Agent design). Left to the model, that mapping differs by host and can blame the wrong field, and the hard rule is that the model edits only the spec. A finding points at a rendered file, and the spec fields behind that file are known exactly at render time.
+
+**Decision.**
+- `render-report.json` gains `sources`: for each spec-driven output file, the sorted list of spec fields that feed it (for example `projects/core/log-0.yaml` is driven by `logging.audit_destination` and `logging.retention_days`). It is declared next to each template call, so it can't drift from the render. A test checks that every listed field exists in the spec and every listed file is rendered. `sources` is metadata and is not part of `output_hash`, so golden hashes are unchanged.
+- `lzctl explain [dir] [--findings file|-]` adds a `cause` to each finding: `kind`, `spec_fields` and `advice`. Input is the `findings` of `check` or `spec validate`, or, with only a directory, a fresh `check`.
+- Kinds: `spec` (change the listed fields; a `spec validate` finding's own path is the field), `integrity` (the file was changed after rendering: re-render, and every other finding on that file is attributed to the edit), `vendored` (an unmodified upstream file that no spec field drives: the baseline is at fault, not the spec), `template` (scanner suppressions in rendered HCL), `baseline` (rendered with another baseline) and `unknown` (not traceable).
+- Deterministic and offline: no model, no network, same output on every host.
+
+**Consequences.**
+- The review step has a reliable starting point and a clear stop signal: any `cause.kind` other than `spec` means editing the spec will not help, and the agent reports it instead of guessing.
+- `explain` is as good as `sources`. A new template must declare its sources, or its findings come back `vendored` or `unknown`. The scanners' findings on HCL will need the same once HCL is rendered.
+- `sources` lives in the report, which `check` does not hash-protect, so a tampered report can mislead `explain`. It cannot hide a change from `check`, because integrity compares files against `files`, and the report is itself produced only by `render`. Report provenance (signing) belongs to the PR flow in P1.
+- A spec field that affects a file only indirectly (a default that changes with the profile) is not listed. The list names fields that reach a template.
 
 ---
 

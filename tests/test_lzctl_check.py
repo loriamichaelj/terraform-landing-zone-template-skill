@@ -335,3 +335,116 @@ def test_real_checkov_flags_a_misconfigured_bucket(tmp_path):
 def test_real_trivy_passes_hcl_with_no_findings(tmp_path):
     out = with_hcl(tmp_path, 'variable "name" {\n  type = string\n}\n')
     assert lzctl._scan_trivy(shutil.which("trivy"), out) == ({"name": "trivy", "status": "passed", "detail": "no misconfigurations"}, [])
+
+
+# --- explain -----------------------------------------------------------------
+
+
+def break_schema(path: Path) -> None:
+    """Replace a rendered YAML file's body with schema-invalid content, keeping its schema declaration."""
+    header = next(line for line in path.read_text().splitlines() if "yaml-language-server" in line)
+    path.write_text(header + "\nlog_buckets: 3\n")
+
+
+def explained(findings, report=None):
+    return lzctl.explain_findings(findings, report)
+
+
+def causes(out: Path) -> dict[tuple[str, str], dict]:
+    report = json.loads((out / lzctl.REPORT_NAME).read_text())
+    return {(e["rule"], e["path"]): e["cause"] for e in explained(lzctl.check_output(out)[1], report)}
+
+
+def test_sources_name_real_spec_fields_and_rendered_files():
+    spec = json.loads((VALID_DIR / "standard.spec.json").read_text())
+    files, report = lzctl.render_spec(spec)
+    assert report["sources"] and set(report["sources"]) <= set(files)
+    for path, fields in report["sources"].items():
+        assert fields and all(lzctl._present(spec, field) for field in fields), path
+    assert report["sources"][DS + "projects/core/log-0.yaml"] == ["logging.audit_destination", "logging.retention_days"]
+    assert report["sources"][DS + "folders/teams/payments/.config.yaml"] == ["hierarchy.business_units"]
+
+
+def test_sources_do_not_change_the_output_hash():
+    # Provenance is metadata about the files, not part of them: golden hashes stay valid.
+    spec = json.loads((VALID_DIR / "standard.spec.json").read_text())
+    files, report = lzctl.render_spec(spec)
+    assert report["output_hash"] == lzctl._output_hash({p: lzctl._sha256(d) for p, d in files.items()})
+
+
+def test_schema_finding_on_a_generated_file_points_at_the_spec(tmp_path):
+    out = render_to(tmp_path)
+    break_schema(out / DS / "projects/core/log-0.yaml")
+    resign(out)
+    cause = next(c for (rule, path), c in causes(out).items() if rule.startswith("check.schema."))
+    assert cause["kind"] == "spec" and cause["spec_fields"] == ["logging.audit_destination", "logging.retention_days"]
+
+
+def test_finding_on_an_untouched_upstream_file_is_not_blamed_on_the_spec(tmp_path):
+    out = render_to(tmp_path)
+    (out / DS / "cicd.yaml").write_text("# yaml-language-server: $schema=../schemas/made-up.schema.json\n")
+    resign(out)
+    cause = causes(out)[("check.schema.unknown", DS + "cicd.yaml")]
+    assert cause["kind"] == "vendored" and cause["spec_fields"] == []
+
+
+def test_hand_edit_is_blamed_on_the_edit_not_the_spec(tmp_path):
+    out = render_to(tmp_path)
+    break_schema(out / DS / "projects/core/log-0.yaml")  # schema-invalid, but the report was not re-signed
+    found = causes(out)
+    assert {c["kind"] for c in found.values()} == {"integrity"}
+    assert any(rule.startswith("check.schema.") for rule, _ in found)
+
+
+def test_spec_validate_findings_pass_through_as_spec_fields():
+    finding = {"rule": "schema.minimum", "path": "logging.retention_days", "message": "too small"}
+    cause = explained([finding])[0]["cause"]
+    assert cause == {"kind": "spec", "spec_fields": ["logging.retention_days"], "advice": "Change this field in the spec."}
+
+
+def test_explain_without_a_report_cannot_trace_rendered_files():
+    cause = explained([{"rule": "check.schema.type", "path": DS + "defaults.yaml", "message": "x"}])[0]["cause"]
+    assert cause["kind"] == "unknown"
+
+
+def test_explain_handles_reports_without_sources(tmp_path):
+    out = render_to(tmp_path)
+    report = json.loads((out / lzctl.REPORT_NAME).read_text())
+    del report["sources"]
+    finding = {"rule": "check.schema.type", "path": DS + "defaults.yaml", "message": "x"}
+    assert explained([finding], report)[0]["cause"]["kind"] == "vendored"
+    assert explained([{**finding, "path": "nope.yaml"}], report)[0]["cause"]["kind"] == "unknown"
+
+
+def test_explain_does_not_mutate_or_drop_findings():
+    findings = [{"rule": "check.hcl.suppression", "path": "main.tf", "message": "m"}]
+    result = explained(findings)
+    assert result[0]["cause"]["kind"] == "template" and {k: result[0][k] for k in findings[0]} == findings[0]
+    assert "cause" not in findings[0]
+
+
+def test_cli_explain_checks_the_directory_itself(tmp_path):
+    out = render_to(tmp_path)
+    (out / "stray.txt").write_text("x")
+    result = run_cli("explain", str(out))
+    assert result.returncode == 0, result.stderr
+    [item] = json.loads(result.stdout)["explained"]
+    assert item["path"] == "stray.txt" and item["cause"]["kind"] == "integrity"
+
+
+def test_cli_explain_reads_findings_from_a_file_and_stdin(tmp_path):
+    payload = json.dumps({"valid": False, "findings": [{"rule": "schema.type", "path": "organization.id", "message": "m"}]})
+    (tmp_path / "f.json").write_text(payload)
+    from_file = run_cli("explain", "--findings", str(tmp_path / "f.json"))
+    from_stdin = subprocess.run([sys.executable, str(_lzctl.LZCTL), "explain", "--findings", "-"], input=payload, capture_output=True, text=True)
+    for result in (from_file, from_stdin):
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout)["explained"][0]["cause"]["spec_fields"] == ["organization.id"]
+
+
+def test_cli_explain_errors_exit_two(tmp_path):
+    (tmp_path / "bad.json").write_text('{"findings": [{"rule": 1}]}')
+    assert run_cli("explain").returncode == 2
+    assert run_cli("explain", str(tmp_path / "missing")).returncode == 2
+    assert run_cli("explain", "--findings", str(tmp_path / "missing.json")).returncode == 2
+    assert run_cli("explain", "--findings", str(tmp_path / "bad.json")).returncode == 2

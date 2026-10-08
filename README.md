@@ -6,7 +6,12 @@ The agent composes vetted baselines (Cloud Foundation Fabric FAST, Azure Verifie
 
 ## Status
 
-**Design stage.** The repo holds the design, decision records and runbooks. The skill, the `lzctl` CLI and the agent are not built yet. The GCP plumbing for CI (state bucket, OIDC, secrets) is in place.
+**Design stage.** The skill, the `lzctl` CLI and the agent are not built yet. What exists today:
+
+- The design, decision records (ADR-001 to ADR-017), the CI/CD strategy and runbooks in [docs/](docs/)
+- GCP plumbing for CI: environment folders, the Terraform state bucket, OIDC trust per GitHub environment, and Secret Manager with a KMS key
+- The **Ops: OIDC check** workflow, passing in `dev` and `bootstrap`
+- Contributor setup: license, contributing guide, code of conduct, security policy, issue forms and Discussions
 
 ## Docs
 

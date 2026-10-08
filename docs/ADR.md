@@ -169,7 +169,7 @@ This replaces the single `lz-ci-sa` in DESIGN.md with per-environment accounts. 
 **Consequences.**
 - Jobs must declare `environment:` to authenticate. Jobs without one, and pull requests from forks (which get no OIDC token), can't reach GCP.
 - Both accounts can read each other's state prefix. Split into one bucket per environment if that becomes a problem.
-- The state bucket uses Google-managed encryption, not the CMEK required in DESIGN.md for agent data. Revisit when the KMS keyring exists.
+- The state bucket uses Google-managed encryption, not the CMEK required in DESIGN.md for agent data. Key ring `tlz` now exists (ADR-014), so a separate `tfstate` key there could close this gap.
 - Neither account has any infrastructure permissions yet. Grant them per environment as `infra/` is written, and add required reviewers to an environment before giving its account write access.
 - Verified 2026-10-07 by **Ops: OIDC check** in both environments. Each environment's job authenticated and ran Terraform against the bucket. A job with no environment, and a job asking for the other environment's account, were both refused.
 
@@ -294,3 +294,25 @@ This replaces the single `lz-ci-sa` in DESIGN.md with per-environment accounts. 
 - Whether Agent Identity (SPIFFE-based) can be used by a Cloud Run-hosted agent, or only by Agent Runtime.
 - Grok Build's project skill folder: run `grok inspect` in this repo to confirm it finds the skill.
 - Roadmap phases and gates were reconstructed from the draft's text, because the original embedded roadmap was not in the file. The engineer-week totals match the cost table; confirm the phase boundaries with the author.
+
+### 2026-10-07: Build-out and docs sweep
+
+**Built after the first review** (each recorded in its ADR):
+
+| What | ADR |
+| --- | --- |
+| Terraform state bucket, GitHub OIDC trust, per-environment service accounts | 013 |
+| Secret Manager with KMS key ring `tlz`, prefix-scoped secret access | 014 |
+| CI/CD strategy, naming conventions, **Ops: OIDC check** workflow (passing in `dev` and `bootstrap`) | 015 |
+| License, community files, Discussions, merge and security settings | 016 |
+| `dev`, `stage` and `prod` folders, org-level `environment` tag, project moved into `dev` | 017 |
+
+**Corrections found along the way**
+
+| # | Issue | Fix |
+| --- | --- | --- |
+| 16 | OIDC bindings used GitHub's name-only subject; this repo issues immutable subjects with owner and repo IDs | Rebound both service accounts (ADR-013) |
+| 17 | ADR-012 said the name tag binds only inside the project | It binds across the org; corrected ADR-012 and DESIGN.md |
+| 18 | CICD.md listed every repo setting as unapplied after ADR-016 applied several | Split into applied and proposed tables |
+| 19 | ADR-013 waited for a key ring that ADR-014 had created | Updated the state-bucket CMEK note |
+| 20 | DESIGN.md had no resource hierarchy, and its repo layout omitted `docs/` and `.github/` | Added both |

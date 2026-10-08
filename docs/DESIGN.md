@@ -342,6 +342,18 @@ resource "google_tags_location_tag_binding" "agent_service" {
 }
 ```
 
+**Resource hierarchy**
+
+```
+mikejloria-org
+├── dev    (environment:dev)
+│   └── skills-mjl-27850  ← this repo's agent platform, CI identities, state and secrets
+├── stage  (environment:stage)   empty for now
+└── prod   (environment:prod)    empty for now
+```
+
+New projects go into the folder for their environment and inherit its `environment` tag, which Google recognizes as the project environment (ADR-017).
+
 **Repository layout**
 
 ```
@@ -351,8 +363,11 @@ agent/                # ADK app: workflow, nodes, tools, callbacks
 validator/            # job image and entrypoint
 infra/                # Terraform for the agent's own platform
 evals/                # golden scenarios and expected specs
-.github/workflows/
+docs/                 # design, ADRs, CI/CD strategy, runbooks
+.github/              # workflows, issue forms, PR template, CODEOWNERS, Dependabot
 ```
+
+Built so far: `docs/`, `.github/` and the community files (LICENSE, CONTRIBUTING, SECURITY, SUPPORT, CODE_OF_CONDUCT). The other directories arrive with P0 and P1.
 
 **Pipeline** (full strategy, environments and naming in [CICD.md](CICD.md))
 

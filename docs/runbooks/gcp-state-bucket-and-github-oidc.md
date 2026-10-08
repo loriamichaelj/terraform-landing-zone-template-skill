@@ -17,6 +17,7 @@ How the Terraform state bucket and the GitHub Actions OIDC trust in project `ski
 
 | Resource | Value | Tagged |
 | --- | --- | --- |
+| Project | `skills-mjl-27850` (number `853750160087`), in folder `dev`, tagged `environment:dev` | Yes |
 | State bucket | `gs://skills-mjl-27850-tlz-tfstate` (us-central1, versioning on, uniform access, public access prevention enforced, noncurrent versions kept up to 10 copies or 90 days) | Yes |
 | Workload identity pool | `projects/853750160087/locations/global/workloadIdentityPools/github` | Not supported (global resource) |
 | OIDC provider | `.../workloadIdentityPools/github/providers/github-actions` | Not supported |
@@ -24,7 +25,7 @@ How the Terraform state bucket and the GitHub Actions OIDC trust in project `ski
 | Service account | `lz-dev-sa@skills-mjl-27850.iam.gserviceaccount.com` (environment `dev`) | Yes |
 | GitHub environments | `bootstrap`, `dev` | n/a |
 
-Each GitHub environment has these variables: `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`, `TF_STATE_BUCKET`, `TF_STATE_PREFIX` (`bootstrap` or `dev`).
+Each GitHub environment has these variables: `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`, `TF_STATE_BUCKET`, `TF_STATE_PREFIX` (`bootstrap` or `dev`). The repo also has `GCP_PROJECT_ID` and `GCP_WORKLOAD_IDENTITY_PROVIDER` at repo level, for jobs that run without an environment (such as the refusal checks in **Ops: OIDC check**).
 
 ## The subject claim
 

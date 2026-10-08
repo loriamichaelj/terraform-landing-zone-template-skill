@@ -33,6 +33,8 @@ Until `main` exists, `dev` is both trunk and the only deploy target. Promotion t
 | `dev-plan` (later) | `lz-dev-plan-sa`, read-only | Terraform plan on pull requests | Pull request | None; read-only identity |
 | `prod` (later) | `lz-prod-sa` | Production | Promotion from `main` | Required reviewers, wait timer, `main` only |
 
+**GCP placement:** `bootstrap` and `dev` both run in project `skills-mjl-27850`, which sits in the `dev` folder. The `stage` and `prod` folders exist (tagged `environment:stage` and `environment:prod`) but stay empty until those environments are needed ([ADR-017](ADR.md#adr-017-environment-folders-and-the-environment-tag)).
+
 **Why `dev-plan` is needed later:** once `dev` is restricted to deploy from the `dev` branch only, pull-request jobs can't use it, but they still need to read state to plan. A separate read-only identity keeps planning possible without giving unmerged code write access. This mirrors FAST's read-only/read-write split for CI service accounts.
 
 ## Workflow inventory
@@ -120,15 +122,28 @@ Required status checks are named `<workflow name> / <job name>`, so renaming a w
 | `hashicorp/setup-terraform` | v4.0.1 `dfe3c3f87815947d99a8997f908cb6525fc44e9e` |
 | Terraform CLI | 1.16.5 |
 
-## Repository settings (proposed, not yet applied)
+## Repository settings
+
+**Applied** (ADR-016, 2026-10-07)
+
+| Setting | Value |
+| --- | --- |
+| Default workflow token | Read-only |
+| Actions can approve PRs | No |
+| Workflows on PRs from outside contributors | Need maintainer approval (all external contributors) |
+| Merge methods | Squash only; commit title = PR title, message = PR body |
+| Delete branch on merge | On |
+| Secret scanning and push protection | On |
+| Dependabot alerts and security updates | On |
+| Private vulnerability reporting | On |
+
+**Proposed, not yet applied**
 
 | Setting | Current | Proposed |
 | --- | --- | --- |
 | Allowed actions | All | Selected: the publishers above |
 | Require SHA pinning | Off | On |
-| Default workflow token | Read-only | Keep |
-| Actions can approve PRs | No | Keep |
-| `dev` branch ruleset | None | Require PR, require status checks (CI: Docs, CI: Workflows, then Terraform and Skill as they exist), block force-push |
+| `dev` branch ruleset | None | Require PR with code owner review, require status checks (CI: Docs, CI: Workflows, then Terraform and Skill as they exist), block force-push |
 | `bootstrap` environment | No rules | Required reviewer: repo owner; deploy from `dev` only |
 | `dev` environment | No rules | Deploy from `dev` only (after `dev-plan` exists) |
 

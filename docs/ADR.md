@@ -452,7 +452,7 @@ A ruleset was used rather than classic branch protection: rulesets are GitHub's 
 - **Evals.** Deterministic evals (golden hashes, schema, `lzctl check`) run in CI and cost nothing. Model-backed evals run only on demand (`ops-evals.yml`, manual) and before a release, with a monthly budget cap that stops the workflow. No scheduled full runs.
 - **Model Armor** is optional in `dev`. Enable it if its price at this volume is a few dollars a month. If it is not, the other injection defences stand (typed `lzctl` arguments, workflow-enforced gates, no write credentials in reach, requirements treated as data) and the gap is recorded in the PR body and the risk table.
 - **Housekeeping that keeps free tiers free:** 30-day lifecycle on artifacts, Artifact Registry keeps the last 5 images, a log exclusion for debug noise, and a budget alert on the project.
-- **The $20 cap** is a design requirement, split as about $3 for the fixed floor, $14 for model tokens including evals, and $3 of headroom. Tokens are the only line that can grow, so they are the one capped in code. Controls, in order: (1) a billing budget of $20 a month on this project with alerts at 50, 75, 90 and 100% of actual spend and at 100% of forecast, which **exists as of 2026-10-08** and only sends email; (2) an in-app spend meter that refuses new runs at the $14 token budget; (3) a per-run token ceiling alongside the 3 review loops; (4) a daily model-API quota override, if one can be set; (5) a conftest cost policy on `infra/` that fails CI on min instances above 0, max instances above 1, or a VM, Cloud SQL, load balancer or NAT. Controls 2 to 5 are built with the hosted agent in P1. A billing kill switch is not planned: detaching billing would stop everything, including the state bucket.
+- **The $20 cap** is a design requirement, split as about $3 for the fixed floor, $14 for model tokens including evals, and $3 of headroom. Tokens are the only line that can grow, so they are the one capped in code. Controls, in order: (1) a billing budget of $20 a month on this project with alerts at 50, 75, 90 and 100% of actual spend and at 100% of forecast, which **exists as of 2026-10-08** and only sends email; (2) an in-app spend meter that refuses new runs at the $14 token budget; (3) a per-run token ceiling alongside the 3 review loops; (4) a daily model-API quota override, if one can be set; (5) a conftest cost policy on `infra/` that fails CI on min instances above 0, max instances above 1, or a VM, Cloud SQL, load balancer or NAT. Spend is visible through a Cloud Billing export (standard usage cost) to the BigQuery dataset `billing_export` in `us-central1`, tagged per ADR-012 and ADR-019, switched on in the Console on 2026-10-08 (there is no CLI or API for that step). It does not backfill, so the month-to-date figure comes from it only for costs after that date. Controls 2 to 5 are built with the hosted agent in P1. A billing kill switch is not planned: detaching billing would stop everything, including the state bucket.
 - **Not changed:** CMEK (ADR-014), tags (ADR-012, ADR-019), IAP, validator isolation and the human approval gate. They cost cents and are the reason an adopter can trust the output.
 
 **Consequences.**
@@ -462,6 +462,7 @@ A ruleset was used rather than classic branch protection: rulesets are GitHub's 
 - The remaining big cost is engineer time: P2 and P3 (Azure, AWS, OpenStack, hardening) are about $58K to $82K of the $100K to $140K build estimate. Dev-only does not change that; deferring those phases would.
 - With controls 1 to 5 in place the worst month is about $19 and a typical one $7 to $10. Until P1 only control 1 exists, and it cannot stop spend, so the cap holds only because almost nothing billable is running.
 - If the token budget is reached, new runs are refused until the next month. That is intended.
+- The cap covers the whole project, not just the platform. The project also holds a registered domain and its Cloud DNS zone, which are not part of the design and cost about $1.30 a month averaged ($12 a year for the .com plus $0.20 a month for the zone), and the registration fee lands in the month it is bought. They count against the $20.
 - Cost numbers use free tiers and list prices that are not all verified yet (see the review log's unverified list).
 
 ---
@@ -551,7 +552,7 @@ A ruleset was used rather than classic branch protection: rulesets are GitHub's 
 | `lzctl check`, trivy and checkov scans, `lzctl explain`, the 2-networking render | 021, 022, 023, 024 |
 | Prometheus and Grafana scoped for the agent platform, then deferred | 025 |
 | Dev-only deployment, cost defaults and the $20 a month cap | 026 |
-| $20 monthly billing budget with alerts, scoped to this project (the only control built so far) | 026 |
+| $20 monthly billing budget with alerts, scoped to this project, and the billing export to BigQuery (the only controls built so far) | 026 |
 
 **Corrections found along the way**
 
@@ -560,3 +561,5 @@ A ruleset was used rather than classic branch protection: rulesets are GitHub's 
 | 27 | CI: Docs failed on the first run after vendoring the networking stage: the upstream README's relative links point into the upstream repo | The docs checker skips vendored `upstream/` trees |
 | 28 | The Trivy version was passed through an environment variable, which zizmor flagged as unpinned, and repository variables were expanded inside `run:` blocks | Literal version; variables passed through `env:` |
 | 29 | The cost model assumed `prod`, an always-on instance, Pro review and scheduled evals | Rebuilt for dev only (ADR-026); figures in DESIGN.md recomputed |
+| 30 | A resource inventory that covered only the services the design uses missed a registered domain and a DNS zone in the project, so the first estimate of current spend was far too low | The inventory now checks every enabled API's resources; the two are recorded in ADR-026 as costs outside the platform |
+| 31 | A Cloud Run placeholder in `us-west1` was untagged, untracked and outside our region | Deleted; every regional resource is now in `us-central1` |

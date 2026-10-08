@@ -169,11 +169,13 @@ Phases are gated, not dated: each starts when the previous gate passes. Details 
 | Organization | `mikejloria-org` |
 | Folders | `dev`, `stage`, `prod` at the org root, tagged `environment:dev` / `stage` / `prod` (`stage` and `prod` empty for now) |
 | Project | `skills-mjl-27850`, in the `dev` folder, tagged `environment:dev` |
-| Region | `us-central1` |
+| Region | `us-central1` for every regional resource; the DNS zone, the domain registration and the default log buckets are global |
 | Terraform state | `gs://skills-mjl-27850-tlz-tfstate`, one prefix per environment |
 | OIDC provider | `projects/853750160087/locations/global/workloadIdentityPools/github/providers/github-actions` |
 | Secrets | Secret Manager, encrypted with KMS key `tlz/secret-manager` |
 | Budget | $20 a month on the project, alerts at 50%, 75%, 90% and 100% of spend and at 100% of forecast (ADR-026) |
+| Billing export | Cloud Billing standard usage cost to the BigQuery dataset `billing_export` (`us-central1`), on since 2026-10-08; it does not backfill |
+| Domain | `michaeljloria.com`, registered in Cloud Domains and delegated to a Cloud DNS zone in the project. Not part of the platform; no records yet |
 
 | GitHub environment | Service account | Can read secrets named |
 | --- | --- | --- |

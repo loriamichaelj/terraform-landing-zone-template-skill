@@ -369,7 +369,7 @@ mikejloria-org
 └── prod   (environment:prod)    empty for now
 ```
 
-New projects go into the folder for their environment and inherit its `environment` tag, which Google recognizes as the project environment (ADR-017).
+New projects go into the folder for their environment and inherit its `environment` tag, which Google recognizes as the project environment (ADR-017). The project also holds a registered domain and its DNS zone, which are not part of the platform; they count against the project's cost cap (ADR-026).
 
 **Repository layout**
 

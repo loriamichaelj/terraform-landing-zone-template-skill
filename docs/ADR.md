@@ -25,6 +25,7 @@ Statuses: **Proposed** (in the design, awaiting reviewer sign-off) · **Accepted
 | [015](#adr-015-cicd-strategy-and-workflow-naming) | CI/CD strategy and workflow naming | Proposed | 2026-10-07 |
 | [016](#adr-016-open-to-contributors-under-apache-20) | Open to contributors under Apache-2.0 | Accepted | 2026-10-07 |
 | [017](#adr-017-environment-folders-and-the-environment-tag) | Environment folders and the environment tag | Accepted | 2026-10-07 |
+| [018](#adr-018-dev-accepts-changes-only-by-pull-request-except-the-owner) | `dev` accepts changes only by pull request, except the owner | Accepted | 2026-10-07 |
 
 ---
 
@@ -205,7 +206,7 @@ This replaces the single `lz-ci-sa` in DESIGN.md with per-environment accounts. 
 - **First workflow:** `ops-oidc-check.yml` proves the trust works and is scoped. One job must authenticate in its own environment and use the state bucket through Terraform. Two jobs must be refused: one with no environment, and one asking for the other environment's account.
 
 **Consequences.**
-- The repo settings in CICD.md (selected actions, required SHA pinning, branch ruleset, environment protections) are proposed but not applied. Until they are, nothing enforces the conventions.
+- Some repo settings in CICD.md are applied (ADR-016, ADR-018); selected actions, required SHA pinning, status checks and environment protections are still only proposed, so nothing enforces those conventions yet.
 - Renaming a workflow or job later breaks any required status check that references it.
 - Repo-level variables `GCP_PROJECT_ID` and `GCP_WORKLOAD_IDENTITY_PROVIDER` were added, so jobs without an environment can name the provider. They're identifiers, not secrets.
 
@@ -227,7 +228,7 @@ This replaces the single `lz-ci-sa` in DESIGN.md with per-environment accounts. 
 **Consequences.**
 - Conduct reports use the security advisory form, which is a workaround: GitHub has no private channel dedicated to conduct reports.
 - With one maintainer, the SECURITY.md response targets are best-effort.
-- Branch protection on `dev` is still not applied (ADR-015 open question), so CODEOWNERS review is requested but not required.
+- CODEOWNERS review became required for everyone except the owner when the `dev` ruleset was added (ADR-018).
 
 ## ADR-017: Environment folders and the environment tag
 
@@ -247,6 +248,27 @@ This replaces the single `lz-ci-sa` in DESIGN.md with per-environment accounts. 
 - Org policies and IAM set on a folder now apply to the project. Today the folders have none, so the project's effective access didn't change.
 - `stage` and `prod` stay empty for now (owner decision, 2026-10-07): no projects, GitHub environments, service accounts or state prefixes. They hold the place and the environment tag until those environments are needed. Whether stage joins the pipeline is decided when it's first populated (CICD.md).
 - The ADR-012 name tag binding to folders showed that a project-parented tag key works across the organization; ADR-012 was corrected.
+
+## ADR-018: `dev` accepts changes only by pull request, except the owner
+
+**Status:** Accepted · 2026-10-07
+
+**Context.** `dev` is the default branch and the only deploy target (ADR-015), but anyone with write access could push to it directly or force-push over history. The owner asked for branch protection on `dev` that blocks direct pushes for everyone except themselves. The repo is user-owned, and `@loriamichaelj` is its only collaborator and only admin.
+
+**Decision.** Repository ruleset **dev: pull requests only** (id `24695181`), active on `refs/heads/dev`:
+
+- Changes only through pull requests, merged by squash.
+- 1 approving review, which must come from a code owner. Approvals are dismissed when new commits are pushed, and all review conversations must be resolved.
+- Linear history; no force-pushes; the branch can't be deleted.
+- **Bypass:** the repository Admin role, mode "always". Only the owner holds that role, so only the owner can push directly or merge without a review.
+
+A ruleset was used rather than classic branch protection: rulesets are GitHub's current mechanism, they're visible to everyone who can read the repo, and they support bypass lists.
+
+**Consequences.**
+- The bypass is tied to the Admin role, not to a username. Anyone later given Admin on this repo can also bypass, so keep other collaborators at Write or Maintain.
+- Anything acting with the owner's credentials (a local `gh` session, a personal access token, automation running as the owner) bypasses too. Bots such as Dependabot don't, and must go through pull requests.
+- No required status checks yet, because no PR workflows exist. Add CI: Docs and CI: Workflows to this ruleset when they land (CICD.md).
+- The owner can still force-push to `dev` through the bypass, as was done for the history rewrite earlier. That's deliberate but should stay rare; anyone else with a clone has to reset after a force-push.
 
 ---
 

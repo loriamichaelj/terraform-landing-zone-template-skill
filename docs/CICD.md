@@ -136,6 +136,7 @@ Required status checks are named `<workflow name> / <job name>`, so renaming a w
 | Secret scanning and push protection | On |
 | Dependabot alerts and security updates | On |
 | Private vulnerability reporting | On |
+| `dev` ruleset **dev: pull requests only** (ADR-018) | Changes by PR only, 1 approval with code owner review, stale approvals dismissed, conversations resolved, squash only, linear history, no force-push, no deletion. Bypass: Admin role (only `@loriamichaelj`) |
 
 **Proposed, not yet applied**
 
@@ -143,13 +144,13 @@ Required status checks are named `<workflow name> / <job name>`, so renaming a w
 | --- | --- | --- |
 | Allowed actions | All | Selected: the publishers above |
 | Require SHA pinning | Off | On |
-| `dev` branch ruleset | None | Require PR with code owner review, require status checks (CI: Docs, CI: Workflows, then Terraform and Skill as they exist), block force-push |
+| `dev` required status checks | None | Add CI: Docs and CI: Workflows to the `dev` ruleset once they exist, then Terraform and Skill |
 | `bootstrap` environment | No rules | Required reviewer: repo owner; deploy from `dev` only |
 | `dev` environment | No rules | Deploy from `dev` only (after `dev-plan` exists) |
 
 ## Open questions
 
-- [ ] **Branch protection timing:** add the `dev` ruleset now (blocks direct pushes and force-pushes from then on), or after the first CI workflows exist?
+- [x] **Branch protection timing:** the `dev` ruleset was added on 2026-10-07, before any CI checks exist; status checks get added to it as workflows land (ADR-018).
 - [ ] **`dev-plan` identity:** create it in P0 with `infra/`, or plan with `lz-dev-sa` until the first real deploy?
 - [ ] **Production:** when to create `main` and `prod`, and who approves promotions? The GCP `stage` and `prod` folders exist but stay empty until then ([ADR-017](ADR.md#adr-017-environment-folders-and-the-environment-tag)).
 - [ ] **Stage:** add a `stage` environment to the pipeline between `dev` and `prod`, or keep promoting straight from `dev`? Decide when the `stage` folder is first populated.

@@ -33,7 +33,7 @@ For anything bigger than a typo, open or comment on an issue before writing the 
 2. **Branch** from `dev` with a prefix: `feature/…`, `fix/…`, `docs/…` or `ci/…`.
 3. **Make the change.** Keep a PR to one logical change.
 4. **Open a pull request against `dev`** and fill in the template.
-5. **Review:** a code owner reviews every PR. Expect questions; they're about the change, not about you.
+5. **Review:** every PR needs one approving review from a code owner, and all review conversations resolved, before it can merge. Pushing new commits dismisses earlier approvals. Expect questions; they're about the change, not about you.
 6. **Merge:** PRs are squash-merged, and the branch is deleted automatically.
 
 ### PR titles and commits

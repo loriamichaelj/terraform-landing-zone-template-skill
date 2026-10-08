@@ -14,6 +14,7 @@ The agent composes vetted baselines (Cloud Foundation Fabric FAST, Azure Verifie
 | --- | --- |
 | [docs/DESIGN.md](docs/DESIGN.md) | Architecture, spec schema, cloud baselines, security, cost estimate, delivery plan |
 | [docs/ADR.md](docs/ADR.md) | Architecture decision records and review log |
+| [docs/CICD.md](docs/CICD.md) | CI/CD strategy: branches, environments, workflow inventory, naming conventions, actions policy |
 | [docs/runbooks/gcp-state-bucket-and-github-oidc.md](docs/runbooks/gcp-state-bucket-and-github-oidc.md) | Terraform state bucket and GitHub Actions OIDC (the GCP equivalent of an AWS OIDC role) |
 | [docs/runbooks/secrets.md](docs/runbooks/secrets.md) | Secret Manager with a KMS key, and GitHub environment secrets |
 
@@ -46,6 +47,8 @@ The same skill runs in Codex, Gemini CLI, Grok Build, DeepSeek-backed hosts and 
 | `dev` | `lz-dev-sa` | `dev-*` |
 
 Each environment has the variables `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`, `TF_STATE_BUCKET` and `TF_STATE_PREFIX`. A job must declare `environment:` to authenticate to GCP. No GCP keys are stored in GitHub.
+
+To check the OIDC setup, run **Ops: OIDC check** (`.github/workflows/ops-oidc-check.yml`) from the Actions tab, or `gh workflow run ops-oidc-check.yml -f environment=dev`.
 
 ## Conventions
 

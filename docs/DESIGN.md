@@ -354,11 +354,11 @@ evals/                # golden scenarios and expected specs
 .github/workflows/
 ```
 
-**Pipeline**
+**Pipeline** (full strategy, environments and naming in [CICD.md](CICD.md))
 
-1. On PR: unit tests, template render tests, ADK evals against the golden set, Terraform plan for `infra/`.
-2. On merge to main: build and sign images, apply `infra/` to staging, deploy to staging, smoke test.
-3. Promote to production by manual approval, deploying the same image digest.
+1. On PR to `dev`: unit tests, template render tests, ADK eval smoke set, Terraform plan for `infra/`.
+2. On merge to `dev`: build and sign images, apply `infra/` to the `dev` environment, deploy to dev, smoke test.
+3. Later, promote to production from `main` by manual approval, deploying the same image digest.
 
 Skill releases follow the same flow, because a skill change can alter output as much as a code change.
 

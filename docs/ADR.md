@@ -22,6 +22,7 @@ Statuses: **Proposed** (in the design, awaiting reviewer sign-off) · **Accepted
 | [012](#adr-012-tag-every-resource-this-repo-creates) | Tag every resource this repo creates | Accepted | 2026-10-07 |
 | [013](#adr-013-github-oidc-through-workload-identity-federation-one-service-account-per-environment) | GitHub OIDC through Workload Identity Federation, one service account per environment | Accepted | 2026-10-07 |
 | [014](#adr-014-secrets-in-secret-manager-encrypted-with-our-kms-key-github-environment-secrets-only-for-ci) | Secrets in Secret Manager encrypted with our KMS key; GitHub environment secrets only for CI | Accepted | 2026-10-07 |
+| [015](#adr-015-cicd-strategy-and-workflow-naming) | CI/CD strategy and workflow naming | Proposed | 2026-10-07 |
 
 ---
 
@@ -186,6 +187,24 @@ This replaces the single `lz-ci-sa` in DESIGN.md with per-environment accounts. 
 - The key ring can never be deleted, so its name is permanent. Keys can be disabled and destroyed (with a scheduled-destruction delay).
 - KMS keys can't take tags; the key inherits the ADR-012 tag from the key ring.
 - The terraform state bucket still uses Google-managed encryption (ADR-013). It could reuse this key ring with a separate key.
+
+## ADR-015: CI/CD strategy and workflow naming
+
+**Status:** Proposed · 2026-10-07 · Details in [CICD.md](CICD.md)
+
+**Context.** The repo has its OIDC trust, the `bootstrap` and `dev` environments and a state bucket, but no workflows. DESIGN.md's pipeline assumed a `main` branch and a staging environment, neither of which exists; `dev` is the default branch. The owner asked for a test of OIDC in `dev` and a scoped pipeline with naming rules before more workflows are written.
+
+**Decision.**
+- **Branching:** `dev` is trunk and the only deploy target until production exists. Work happens in short-lived branches merged to `dev` by pull request. `main` and `prod` come later, with promotion by the same image digest.
+- **Workflows:** plan on pull request, apply on merge; one identity per environment. A read-only `dev-plan` identity will be added for PR plans once `dev` is limited to deploying from its own branch.
+- **Naming:** workflow files are `<category>-<subject>[-<environment>].yml`, with categories `ci`, `cd`, `ops`, `release` and `reusable`. Display names are `<Category>: <Subject>`. Job IDs are stable kebab-case, because they become required status checks.
+- **Actions policy:** pin every action to a full commit SHA, with Dependabot updating pins weekly. Allow only GitHub, Google and HashiCorp actions plus named tools. Use pinned runner images, `permissions: {}` by default, and a timeout on every job.
+- **First workflow:** `ops-oidc-check.yml` proves the trust works and is scoped. One job must authenticate in its own environment and use the state bucket through Terraform. Two jobs must be refused: one with no environment, and one asking for the other environment's account.
+
+**Consequences.**
+- The repo settings in CICD.md (selected actions, required SHA pinning, branch ruleset, environment protections) are proposed but not applied. Until they are, nothing enforces the conventions.
+- Renaming a workflow or job later breaks any required status check that references it.
+- Repo-level variables `GCP_PROJECT_ID` and `GCP_WORKLOAD_IDENTITY_PROVIDER` were added, so jobs without an environment can name the provider. They're identifiers, not secrets.
 
 ---
 

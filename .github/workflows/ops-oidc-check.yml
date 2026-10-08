@@ -1,0 +1,139 @@
+# Proves the GitHub OIDC trust to GCP works, and that it is scoped per environment.
+# Runbook: docs/runbooks/gcp-state-bucket-and-github-oidc.md · Conventions: docs/CICD.md
+name: "Ops: OIDC check"
+run-name: "OIDC check (${{ inputs.environment || 'dev' }})"
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: GitHub environment to test
+        type: choice
+        options: [dev, bootstrap]
+        default: dev
+  push:
+    branches: [dev]
+    paths: [.github/workflows/ops-oidc-check.yml]
+
+permissions: {}
+
+concurrency:
+  group: ops-oidc-check-${{ inputs.environment || 'dev' }}
+  cancel-in-progress: false
+
+env:
+  TARGET_ENV: ${{ inputs.environment || 'dev' }}
+  TERRAFORM_VERSION: 1.16.5
+
+jobs:
+  allow-environment:
+    name: Allow own environment
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: ${{ inputs.environment || 'dev' }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - name: Check the active identity
+        run: |
+          active="$(gcloud auth list --filter=status:ACTIVE --format='value(account)')"
+          echo "Active account: ${active}"
+          test "${active}" = "${{ vars.GCP_SERVICE_ACCOUNT }}"
+
+      - name: Write, read and delete an object in the state bucket
+        env:
+          OBJECT: gs://${{ vars.TF_STATE_BUCKET }}/${{ vars.TF_STATE_PREFIX }}/oidc-check/${{ github.run_id }}-${{ github.run_attempt }}.txt
+        run: |
+          echo "oidc check ${GITHUB_RUN_ID}" | gcloud storage cp - "${OBJECT}"
+          gcloud storage cat "${OBJECT}"
+          gcloud storage rm "${OBJECT}"
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Init, apply and clean up an empty config on the GCS backend
+        working-directory: ${{ runner.temp }}
+        env:
+          STATE_PREFIX: ${{ vars.TF_STATE_PREFIX }}/oidc-check/${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          mkdir oidc-check && cd oidc-check
+          printf 'terraform {\n  backend "gcs" {}\n}\n' > main.tf
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="prefix=${STATE_PREFIX}"
+          terraform apply -input=false -auto-approve
+          gcloud storage ls "gs://${{ vars.TF_STATE_BUCKET }}/${STATE_PREFIX}/"
+          gcloud storage rm --recursive "gs://${{ vars.TF_STATE_BUCKET }}/${STATE_PREFIX}/"
+
+      - name: Summary
+        run: |
+          {
+            echo "### OIDC check: ${TARGET_ENV} environment"
+            echo "- Authenticated as \`${{ vars.GCP_SERVICE_ACCOUNT }}\`"
+            echo "- Read and wrote \`gs://${{ vars.TF_STATE_BUCKET }}/${{ vars.TF_STATE_PREFIX }}/\`"
+            echo "- Terraform ${TERRAFORM_VERSION} init and apply on the GCS backend succeeded"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  deny-no-environment:
+    name: Deny job without environment
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      id-token: write
+    steps:
+      - name: Try to impersonate the environment service account
+        id: auth
+        continue-on-error: true
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: lz-${{ env.TARGET_ENV }}-sa@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+          token_format: access_token
+
+      - name: Expect the request to be refused
+        run: |
+          if [ "${{ steps.auth.outcome }}" = "success" ]; then
+            echo "::error::A job with no environment was able to impersonate lz-${TARGET_ENV}-sa"
+            exit 1
+          fi
+          echo "Refused as expected" >> "${GITHUB_STEP_SUMMARY}"
+
+  deny-other-environment:
+    name: Deny other environment's account
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: ${{ inputs.environment || 'dev' }}
+    permissions:
+      id-token: write
+    env:
+      OTHER_ENV: ${{ (inputs.environment || 'dev') == 'dev' && 'bootstrap' || 'dev' }}
+    steps:
+      - name: Try to impersonate the other environment's service account
+        id: auth
+        continue-on-error: true
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: lz-${{ env.OTHER_ENV }}-sa@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+          token_format: access_token
+
+      - name: Expect the request to be refused
+        run: |
+          if [ "${{ steps.auth.outcome }}" = "success" ]; then
+            echo "::error::Environment ${TARGET_ENV} was able to impersonate lz-${OTHER_ENV}-sa"
+            exit 1
+          fi
+          echo "Refused as expected" >> "${GITHUB_STEP_SUMMARY}"

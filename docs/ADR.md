@@ -20,6 +20,8 @@ Statuses: **Proposed** (in the design, awaiting reviewer sign-off) · **Accepted
 | [010](#adr-010-canonical-skill-location-is-agentsskills) | Canonical skill location is `.agents/skills/` | Proposed | 2026-10-07 |
 | [011](#adr-011-terraform-mcp-server-is-a-development-aid-not-part-of-rendering) | Terraform MCP server is a development aid, not part of rendering | Proposed | 2026-10-07 |
 | [012](#adr-012-tag-every-resource-this-repo-creates) | Tag every resource this repo creates | Accepted | 2026-10-07 |
+| [013](#adr-013-github-oidc-through-workload-identity-federation-one-service-account-per-environment) | GitHub OIDC through Workload Identity Federation, one service account per environment | Accepted | 2026-10-07 |
+| [014](#adr-014-secrets-in-secret-manager-encrypted-with-our-kms-key-github-environment-secrets-only-for-ci) | Secrets in Secret Manager encrypted with our KMS key; GitHub environment secrets only for CI | Accepted | 2026-10-07 |
 
 ---
 
@@ -144,8 +146,46 @@ Statuses: **Proposed** (in the design, awaiting reviewer sign-off) · **Accepted
 **Consequences.**
 - The key is parented by the project, so it can only be bound to resources in `skills-mjl-27850`. Resources in other projects or orgs (P3 sandboxes) need their own tag key.
 - Terraform needs explicit binding resources for most services, which adds one resource per tagged resource.
-- The deploying identity (`lz-ci-sa`) needs `roles/resourcemanager.tagUser` on the tag value and on the resources it binds to.
+- The deploying identities (`lz-bootstrap-sa`, `lz-dev-sa`; see ADR-013) need `roles/resourcemanager.tagUser` on the tag value and on the resources it binds to.
 - The tag does not apply to landing zones the agent generates for users.
+
+## ADR-013: GitHub OIDC through Workload Identity Federation, one service account per environment
+
+**Status:** Accepted · 2026-10-07 · Built; see [runbook](runbooks/gcp-state-bucket-and-github-oidc.md)
+
+**Context.** CI needs Terraform state and, later, deploy rights without service account keys. The owner asked for the GCP equivalent of an AWS OIDC role, and for GitHub environments `bootstrap` and `dev`. The repo is public, and its default branch is `dev`.
+
+**Decision.**
+- **Trust:** workload identity pool `github` with OIDC provider `github-actions`. The provider only accepts tokens whose `repository_owner_id` is `165821667` (`loriamichaelj`), so other skill repos from the same account can reuse the pool.
+- **Roles:** one service account per GitHub environment (`lz-bootstrap-sa`, `lz-dev-sa`). Each can be impersonated only by the exact subject `repo:loriamichaelj/terraform-landing-zone-template-skill:environment:<env>`, the same check an AWS trust policy makes on `sub`.
+- **State:** one bucket, `skills-mjl-27850-tlz-tfstate` (us-central1). It has versioning, keeps up to 10 noncurrent versions for at most 90 days, enforces uniform access and public access prevention, and uses one prefix per environment. Both service accounts have `roles/storage.objectUser` on it.
+- **Tags:** the bucket and both service accounts carry the ADR-012 tag. The pool and provider are global resources that can't take tags.
+
+This replaces the single `lz-ci-sa` in DESIGN.md with per-environment accounts. Service account impersonation was chosen over direct federated access because some Google APIs the agent's infrastructure will use don't accept federated principals.
+
+**Consequences.**
+- Jobs must declare `environment:` to authenticate. Jobs without one, and pull requests from forks (which get no OIDC token), can't reach GCP.
+- Both accounts can read each other's state prefix. Split into one bucket per environment if that becomes a problem.
+- The state bucket uses Google-managed encryption, not the CMEK required in DESIGN.md for agent data. Revisit when the KMS keyring exists.
+- Neither account has any infrastructure permissions yet. Grant them per environment as `infra/` is written, and add required reviewers to an environment before giving its account write access.
+
+## ADR-014: Secrets in Secret Manager encrypted with our KMS key; GitHub environment secrets only for CI
+
+**Status:** Accepted · 2026-10-07 · Built; see [runbook](runbooks/secrets.md)
+
+**Context.** The owner asked to store secrets "in KMS" and in GitHub's `dev` environment. KMS stores keys, not secrets, so the owner chose Secret Manager encrypted with a customer-managed KMS key (CMEK), which DESIGN.md already requires for stored data. The specific secrets are still to be listed.
+
+**Decision.**
+- **Key:** key ring `tlz` in us-central1, with key `secret-manager` (software protection, 90-day automatic rotation). Only the Secret Manager service agent can encrypt and decrypt with it.
+- **Secret Manager:** secrets use user-managed replication pinned to us-central1 with that key, which meets the data-residency requirement.
+- **Access:** set by name prefix through conditional IAM. `lz-dev-sa` can read `dev-*` secrets and `lz-bootstrap-sa` can read `bootstrap-*` secrets, matching the GitHub environment that can impersonate each account (ADR-013).
+- **GitHub environment secrets** hold only what a CI job needs outside GCP. GCP credentials never go there, because CI authenticates with OIDC.
+
+**Consequences.**
+- CMEK is not enforced by policy. A secret created without `--kms-key-name` silently uses Google-managed encryption. Consider the `constraints/gcp.restrictNonCmekServices` org policy for Secret Manager once more secrets exist.
+- The key ring can never be deleted, so its name is permanent. Keys can be disabled and destroyed (with a scheduled-destruction delay).
+- KMS keys can't take tags; the key inherits the ADR-012 tag from the key ring.
+- The terraform state bucket still uses Google-managed encryption (ADR-013). It could reuse this key ring with a separate key.
 
 ---
 

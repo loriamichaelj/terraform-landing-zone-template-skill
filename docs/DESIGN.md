@@ -293,7 +293,7 @@ The agent's blast radius is a pull request: it can propose changes, never make t
 
 - `lz-agent-sa`: invoke Gemini, run the validator job, read and write its own Firestore and GCS bucket, read the GitHub App secret.
 - `lz-validator-sa`: read the artifact bucket prefix for its run, write findings. Nothing else.
-- `lz-ci-sa`: deploy the service and job via Workload Identity Federation from GitHub Actions.
+- `lz-bootstrap-sa` and `lz-dev-sa`: one per GitHub environment, impersonated via Workload Identity Federation only from that environment's jobs; deploy the service and job, and read and write Terraform state in `gs://skills-mjl-27850-tlz-tfstate` (see ADR-013).
 
 **Compliance mapping** (SOC 2, PCI-DSS where in scope): change management through PRs, separation of duties between the agent and approvers, audit logging, encryption with CMEK, and access control through IAP. Confirm with the compliance team which controls this system inherits versus owns.
 

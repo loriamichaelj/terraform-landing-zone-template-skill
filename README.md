@@ -1,6 +1,54 @@
 # terraform-landing-zone-template-skill
 
-Terraform landing zone template for Google Cloud.
+A portable Agent Skill, plus a hosted ADK agent on Cloud Run, that turns landing zone requirements into a validated Terraform landing zone for GCP, Azure, AWS or OpenStack, delivered as a GitHub pull request.
 
-- GCP project: `skills-mjl-27850`
-- Default branch: `dev`
+The agent composes vetted baselines (Cloud Foundation Fabric FAST, Azure Verified Modules, AWS Control Tower with AFT) and fills in their configuration data. It never writes freeform HCL and never runs `terraform apply`.
+
+## Status
+
+**Design stage.** The repo holds the design, decision records and runbooks. The skill, the `lzctl` CLI and the agent are not built yet. The GCP plumbing for CI (state bucket, OIDC, secrets) is in place.
+
+## Docs
+
+| Doc | What it covers |
+| --- | --- |
+| [docs/DESIGN.md](docs/DESIGN.md) | Architecture, spec schema, cloud baselines, security, cost estimate, delivery plan |
+| [docs/ADR.md](docs/ADR.md) | Architecture decision records and review log |
+| [docs/runbooks/gcp-state-bucket-and-github-oidc.md](docs/runbooks/gcp-state-bucket-and-github-oidc.md) | Terraform state bucket and GitHub Actions OIDC (the GCP equivalent of an AWS OIDC role) |
+| [docs/runbooks/secrets.md](docs/runbooks/secrets.md) | Secret Manager with a KMS key, and GitHub environment secrets |
+
+## How it works
+
+1. **Intake:** a conversation fills a landing zone spec (JSON), checked against a schema derived from the baseline.
+2. **Render:** `lzctl` turns the spec into configuration data (FAST YAML datasets, tfvars) using templates, with no model in the loop, so the same spec always gives the same output.
+3. **Validate:** fmt, validate, tflint, trivy, OPA policy and schema checks run in an isolated job with no network access. Failures map back to spec fields and are fixed in the spec, up to 3 times.
+4. **Publish:** after human approval, a pull request opens with the config, a README, the validation report and a decision log.
+
+The same skill runs in Codex, Gemini CLI, Grok Build, DeepSeek-backed hosts and the hosted agent.
+
+## GCP environment
+
+| Item | Value |
+| --- | --- |
+| Organization | `mikejloria-org` |
+| Project | `skills-mjl-27850` |
+| Region | `us-central1` |
+| Terraform state | `gs://skills-mjl-27850-tlz-tfstate`, one prefix per environment |
+| OIDC provider | `projects/853750160087/locations/global/workloadIdentityPools/github/providers/github-actions` |
+| CI service accounts | `lz-bootstrap-sa`, `lz-dev-sa` (one per GitHub environment) |
+| Secrets | Secret Manager, encrypted with KMS key `tlz/secret-manager`; names prefixed `bootstrap-` or `dev-` |
+
+## GitHub environments
+
+| Environment | Service account | Can read secrets named |
+| --- | --- | --- |
+| `bootstrap` | `lz-bootstrap-sa` | `bootstrap-*` |
+| `dev` | `lz-dev-sa` | `dev-*` |
+
+Each environment has the variables `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`, `TF_STATE_BUCKET` and `TF_STATE_PREFIX`. A job must declare `environment:` to authenticate to GCP. No GCP keys are stored in GitHub.
+
+## Conventions
+
+- **Resource tag:** every resource this repo creates is bound to `skills-mjl-27850/name/Terraform-Landing-Zone-Template-Skill` ([ADR-012](docs/ADR.md#adr-012-tag-every-resource-this-repo-creates)).
+- **Decisions:** record every design decision and its context in [docs/ADR.md](docs/ADR.md).
+- **Branching:** `dev` is the default branch.

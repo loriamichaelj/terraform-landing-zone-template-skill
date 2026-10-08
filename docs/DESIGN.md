@@ -282,6 +282,7 @@ The Cloud Run ADK agent becomes one more host: it calls the same `lzctl`, so hos
 - Keep `SKILL.md` short and load `references/<cloud>.md` on demand, so small-context models still fit.
 - Runtime dependencies: Python 3.11, Terraform or OpenTofu, tflint, trivy, checkov, conftest. `lzctl doctor` checks them.
 - Ship one canonical copy in `.agents/skills/landing-zone/` and symlink `.gemini/skills/landing-zone` to it, so hosts never read divergent copies.
+- Keep `SKILL.md` frontmatter inside the Agent Skills specification: `name` equals the folder name, `description` at most 200 characters (the specification allows 1024; one platform is reported to cap it lower), valid YAML, and a `compatibility` field that states the runtime needs. The release zip has one top-level `landing-zone/` folder, and `tools/build_skill_zip.py` refuses to package a skill that breaks these rules (ADR-027).
 - Evals run per host x model, because spec quality differs by model even when rendering is identical.
 - Optional, development time only: the HashiCorp Terraform MCP server (GA June 2026) gives hosts version-accurate provider and module docs. It is never in the render path.
 

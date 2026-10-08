@@ -1,6 +1,6 @@
 # CI/CD Strategy: Terraform Landing Zone Agent
 
-Oct 7, 2026 · Status: **Proposed** ([ADR-015](ADR.md#adr-015-cicd-strategy-and-workflow-naming)) · Built so far: the OIDC check workflow (passing in `dev` and `bootstrap`)
+Oct 7, 2026 · Status: **Proposed** ([ADR-015](ADR.md#adr-015-cicd-strategy-and-workflow-naming)) · Built so far: the OIDC check workflow (passing in `dev` and `bootstrap`) and CI: Skill
 
 This covers how code in this repo is tested, released and deployed: branches, environments, the workflow inventory, naming conventions and the actions policy. It's the detail behind the Pipeline section of [DESIGN.md](DESIGN.md).
 
@@ -45,7 +45,7 @@ Until `main` exists, `dev` is both trunk and the only deploy target. Promotion t
 | `ci-docs.yml` | CI: Docs | ci | Pull request touching `**.md` | none | Now | Planned |
 | `ci-workflows.yml` | CI: Workflows | ci | Pull request touching `.github/**` | none | Now | Planned |
 | `ci-terraform.yml` | CI: Terraform | ci | Pull request touching `infra/**` | `dev-plan` | P0 | Planned |
-| `ci-skill.yml` | CI: Skill | ci | Pull request touching `.agents/skills/**` | none | P0 | Planned |
+| `ci-skill.yml` | CI: Skill | ci | Every pull request; push to `dev` touching the skill, tests, evals or tools | none | P0 | **Built** |
 | `ci-evals.yml` | CI: Evals smoke | ci | Pull request touching skill, agent or templates | `dev` | P0 | Planned |
 | `ops-evals-full.yml` | Ops: Evals full suite | ops | Weekly schedule; manual | `dev` | P0 | Planned |
 | `cd-infra-bootstrap.yml` | CD: Infra (bootstrap) | cd | Manual | `bootstrap` | P1 | Planned |
@@ -60,7 +60,7 @@ Until `main` exists, `dev` is both trunk and the only deploy target. Promotion t
 - **CI: Docs:** markdown lint, link check, and the repo's content rules.
 - **CI: Workflows:** actionlint, zizmor (workflow security audit) and the SHA-pinning check.
 - **CI: Terraform:** `terraform fmt -check`, `validate`, tflint, trivy, checkov, conftest (including the ADR-012 tag rule), then `plan`, posted as a PR comment.
-- **CI: Skill:** `pip install -r tests/requirements.txt && python -m pytest tests`: `lzctl` unit tests, golden render hashes (byte-identical output), rendered YAML checked against FAST's factory schemas, `lzctl check` on every golden render, and the vendored-upstream manifest check. Run it on Python 3.11 and 3.13, because output must not depend on the interpreter.
+- **CI: Skill:** `pip install -r tests/requirements.txt && python -m pytest tests`: `lzctl` unit tests, golden render hashes (byte-identical output), rendered YAML checked against FAST's factory schemas, `lzctl check` on every golden render, and the vendored-upstream manifest check. It runs on Python 3.11 and 3.13, because output must not depend on the interpreter, and installs Terraform, trivy and checkov at pinned versions with `REQUIRE_TOOLS=1`, so a broken tool install fails the job instead of skipping the real-scanner tests. It has no path filter on pull requests: a path-filtered workflow that is skipped leaves a required check pending forever, and the suite takes about a minute.
 - **CI: Evals smoke:** the 8-scenario subset from DESIGN.md. **Ops: Evals full** runs all 25 scenarios x 4 clouds weekly, about $65 per run.
 
 ## Naming conventions
@@ -120,7 +120,11 @@ Required status checks are named `<workflow name> / <job name>`, so renaming a w
 | `google-github-actions/auth` | v3.0.0 `7c6bc770dae815cd3e89ee6cdf493a5fab2cc093` |
 | `google-github-actions/setup-gcloud` | v3.0.1 `aa5489c8933f4cc7a4f7d45035b3b1440c9c10db` |
 | `hashicorp/setup-terraform` | v4.0.1 `dfe3c3f87815947d99a8997f908cb6525fc44e9e` |
+| `actions/setup-python` | v7.0.0 `5fda3b95a4ea91299a34e894583c3862153e4b97` |
+| `aquasecurity/setup-trivy` | v0.3.1 `81e514348e19b6112ce2a7e3ecbafe19c1e1f567` |
 | Terraform CLI | 1.16.5 |
+| trivy | v0.75.0 |
+| checkov | 3.3.26 |
 
 ## Repository settings
 

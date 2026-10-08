@@ -1,0 +1,85 @@
+# Tests the skill package: lzctl, golden renders, upstream schemas and the scanners.
+# Conventions: docs/CICD.md. Reproduce locally: uv run --with-requirements tests/requirements.txt python -m pytest tests
+name: "CI: Skill"
+run-name: "Skill tests (${{ github.event_name }})"
+
+on:
+  # No path filter on pull requests, so this can become a required status check.
+  pull_request:
+  push:
+    branches: [dev]
+    paths:
+      - .agents/skills/**
+      - .gemini/skills/**
+      - tests/**
+      - evals/**
+      - tools/**
+      - .github/workflows/ci-skill.yml
+
+permissions: {}
+
+concurrency:
+  group: ci-skill-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TERRAFORM_VERSION: 1.16.5
+  TRIVY_VERSION: v0.75.0
+  CHECKOV_VERSION: 3.3.26
+
+jobs:
+  test:
+    name: Test (Python ${{ matrix.python }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # Rendered output must not depend on the interpreter (ADR-020).
+        python: ["3.11", "3.13"]
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Set up Trivy
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+
+      - name: Install Python dependencies
+        run: python -m pip install -r tests/requirements.txt "checkov==${CHECKOV_VERSION}"
+
+      - name: Check lzctl dependencies
+        run: python .agents/skills/landing-zone/scripts/lzctl doctor --format text
+
+      - name: Run the tests
+        env:
+          # Makes a missing terraform, trivy or checkov a failure instead of a skipped test.
+          REQUIRE_TOOLS: "1"
+        run: python -m pytest tests -rs
+
+      - name: Render and check the golden specs
+        run: |
+          lzctl=".agents/skills/landing-zone/scripts/lzctl"
+          for profile in starter standard; do
+            spec="evals/gcp/valid/${profile}.spec.json"
+            out="${RUNNER_TEMP}/render-${profile}"
+            python "${lzctl}" spec validate "${spec}" --format text
+            python "${lzctl}" render "${spec}" --out "${out}" > /dev/null
+            python "${lzctl}" check "${out}" --format text
+          done

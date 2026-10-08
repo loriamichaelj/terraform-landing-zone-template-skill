@@ -1,0 +1,73 @@
+name: Bug report
+description: Something in the skill, lzctl, templates, workflows or docs is wrong
+title: "fix: "
+labels: [bug, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Security problems go to [private reporting](https://github.com/loriamichaelj/terraform-landing-zone-template-skill/security/advisories/new), not here.**
+        Redact org IDs, billing accounts, CIDR plans, domains and email addresses from anything you paste.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you see, and what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: Steps, commands, or a minimal (redacted) spec that shows the problem.
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Skill or lzctl
+        - Templates or baseline mapping
+        - Policies (conftest / Rego)
+        - Hosted agent
+        - GitHub workflows / CI
+        - Docs
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: cloud
+    attributes:
+      label: Target cloud
+      options: [Not cloud-specific, GCP, Azure, AWS, OpenStack]
+    validations:
+      required: true
+  - type: dropdown
+    id: host
+    attributes:
+      label: Agent host
+      options: [Not applicable, Codex, Gemini CLI, Grok Build, DeepSeek-backed host, Hosted agent, Other]
+  - type: input
+    id: version
+    attributes:
+      label: Commit or version
+      description: Output of `git rev-parse --short HEAD`, or the release tag.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or output
+      description: Paste relevant output (redacted). It's formatted as code automatically.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and didn't find this one
+          required: true
+        - label: I removed secrets and sensitive identifiers from everything above
+          required: true

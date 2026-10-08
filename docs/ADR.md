@@ -23,6 +23,8 @@ Statuses: **Proposed** (in the design, awaiting reviewer sign-off) · **Accepted
 | [013](#adr-013-github-oidc-through-workload-identity-federation-one-service-account-per-environment) | GitHub OIDC through Workload Identity Federation, one service account per environment | Accepted | 2026-10-07 |
 | [014](#adr-014-secrets-in-secret-manager-encrypted-with-our-kms-key-github-environment-secrets-only-for-ci) | Secrets in Secret Manager encrypted with our KMS key; GitHub environment secrets only for CI | Accepted | 2026-10-07 |
 | [015](#adr-015-cicd-strategy-and-workflow-naming) | CI/CD strategy and workflow naming | Proposed | 2026-10-07 |
+| [016](#adr-016-open-to-contributors-under-apache-20) | Open to contributors under Apache-2.0 | Accepted | 2026-10-07 |
+| [017](#adr-017-environment-folders-and-the-environment-tag) | Environment folders and the environment tag | Accepted | 2026-10-07 |
 
 ---
 
@@ -145,7 +147,7 @@ Statuses: **Proposed** (in the design, awaiting reviewer sign-off) · **Accepted
 **Decision.** Bind `skills-mjl-27850/name/Terraform-Landing-Zone-Template-Skill` explicitly on every resource this repository creates, not just through inheritance from the project. Enforce it with a conftest rule on the `infra/` plan. Details and a Terraform example are in DESIGN.md under Resource tagging.
 
 **Consequences.**
-- The key is parented by the project, so it can only be bound to resources in `skills-mjl-27850`. Resources in other projects or orgs (P3 sandboxes) need their own tag key.
+- The key is parented by the project, but it binds to other resources in the same organization too: the `dev`, `stage` and `prod` folders were tagged with it on 2026-10-07 (ADR-017). The earlier note that it worked only inside the project was wrong. Resources in a different organization (P3 sandboxes) need their own tag key.
 - Terraform needs explicit binding resources for most services, which adds one resource per tagged resource.
 - The deploying identities (`lz-bootstrap-sa`, `lz-dev-sa`; see ADR-013) need `roles/resourcemanager.tagUser` on the tag value and on the resources it binds to.
 - The tag does not apply to landing zones the agent generates for users.
@@ -206,6 +208,45 @@ This replaces the single `lz-ci-sa` in DESIGN.md with per-environment accounts. 
 - The repo settings in CICD.md (selected actions, required SHA pinning, branch ruleset, environment protections) are proposed but not applied. Until they are, nothing enforces the conventions.
 - Renaming a workflow or job later breaks any required status check that references it.
 - Repo-level variables `GCP_PROJECT_ID` and `GCP_WORKLOAD_IDENTITY_PROVIDER` were added, so jobs without an environment can name the provider. They're identifiers, not secrets.
+
+## ADR-016: Open to contributors under Apache-2.0
+
+**Status:** Accepted · 2026-10-07
+
+**Context.** The repo is public but had no license, so nobody could legally reuse or contribute to it. The owner asked to set it up for contributors and community engagement, and chose the license, the contact model, Discussions and the merge policy.
+
+**Decision.**
+- **License:** Apache-2.0, matching Fabric FAST, ADK and the Google GitHub actions. Contributions are licensed under the same terms (section 5); there's no CLA.
+- **Community files:** CONTRIBUTING, Contributor Covenant 2.1 Code of Conduct, SECURITY, SUPPORT, CODEOWNERS (`@loriamichaelj`), a PR template, and issue forms (bug report, feature request, design proposal). Blank issues are off; questions are routed to Discussions.
+- **Reporting:** security and conduct reports go through GitHub private vulnerability reporting. No email address is published.
+- **Discussions** are on, with the default categories (Q&A, Ideas, Show and tell, Announcements, General, Polls).
+- **Merging:** squash only, using the PR title (Conventional Commits) and body. Branches are deleted on merge.
+- **Security settings:** Dependabot alerts and security updates, secret scanning and push protection are on. Workflows on PRs from all outside contributors need maintainer approval.
+- **Labels:** `needs-triage`, `design`, `ci`, `security`, `area: skill|agent|infra` and `cloud: gcp|azure|aws|openstack`, alongside GitHub's defaults.
+
+**Consequences.**
+- Conduct reports use the security advisory form, which is a workaround: GitHub has no private channel dedicated to conduct reports.
+- With one maintainer, the SECURITY.md response targets are best-effort.
+- Branch protection on `dev` is still not applied (ADR-015 open question), so CODEOWNERS review is requested but not required.
+
+## ADR-017: Environment folders and the environment tag
+
+**Status:** Accepted · 2026-10-07
+
+**Context.** The owner asked for `dev`, `stage` and `prod` folders in `mikejloria-org`, for project `skills-mjl-27850` to move into `dev`, and for an `environment:dev` tag. The org had no folders, and the owner had neither Folder Creator nor Tag Administrator. gcloud warned on every command that the project had no environment tag, which Google recognizes only from a tag key named `environment`, defined at the organization or folder level.
+
+**Decision.**
+- **Folders:** `dev` (`folders/943512507903`), `stage` (`folders/627589503607`) and `prod` (`folders/615332921566`), directly under the org (the owner's choice). They're shared by every skill in the org, so other skills put their projects in them rather than creating their own environment folders.
+- **Project:** `skills-mjl-27850` moved from the org root into `dev`.
+- **Environment tag:** org-level key `environment` (`tagKeys/281478650722081`) with values `dev`, `stage` and `prod`, which Google recognizes as Development, Staging and Production. Each folder carries its value, so projects inherit it. `skills-mjl-27850` is also bound directly to `environment:dev`; gcloud now reports `[environment: Development]`.
+- **Name tag:** all three folders carry the ADR-012 name tag.
+- **Permissions:** the owner (`mikejloria@gmail.com`) was granted `roles/resourcemanager.folderCreator`, `roles/resourcemanager.tagAdmin` and `roles/resourcemanager.tagUser` on the organization, at the owner's request.
+
+**Consequences.**
+- Folder names at the org root are unique, so no other top-level folder can be called `dev`, `stage` or `prod`.
+- Org policies and IAM set on a folder now apply to the project. Today the folders have none, so the project's effective access didn't change.
+- `stage` and `prod` folders exist, but there are no matching GitHub environments, service accounts or state prefixes yet. CICD.md still plans `prod` for later and has no `stage`. Decide whether stage joins the pipeline before creating them.
+- The ADR-012 name tag binding to folders showed that a project-parented tag key works across the organization; ADR-012 was corrected.
 
 ---
 

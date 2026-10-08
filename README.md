@@ -32,7 +32,8 @@ The same skill runs in Codex, Gemini CLI, Grok Build, DeepSeek-backed hosts and 
 | Item | Value |
 | --- | --- |
 | Organization | `mikejloria-org` |
-| Project | `skills-mjl-27850` |
+| Folders | `dev`, `stage`, `prod` at the org root, tagged `environment:dev` / `stage` / `prod` |
+| Project | `skills-mjl-27850`, in the `dev` folder, tagged `environment:dev` |
 | Region | `us-central1` |
 | Terraform state | `gs://skills-mjl-27850-tlz-tfstate`, one prefix per environment |
 | OIDC provider | `projects/853750160087/locations/global/workloadIdentityPools/github/providers/github-actions` |
@@ -52,6 +53,19 @@ To check the OIDC setup, run **Ops: OIDC check** (`.github/workflows/ops-oidc-ch
 
 ## Conventions
 
-- **Resource tag:** every resource this repo creates is bound to `skills-mjl-27850/name/Terraform-Landing-Zone-Template-Skill` ([ADR-012](docs/ADR.md#adr-012-tag-every-resource-this-repo-creates)).
+- **Resource tags:** every resource this repo creates is bound to `skills-mjl-27850/name/Terraform-Landing-Zone-Template-Skill` ([ADR-012](docs/ADR.md#adr-012-tag-every-resource-this-repo-creates)). Environment folders and projects also carry the org-level `environment` tag ([ADR-017](docs/ADR.md#adr-017-environment-folders-and-the-environment-tag)).
 - **Decisions:** record every design decision and its context in [docs/ADR.md](docs/ADR.md).
-- **Branching:** `dev` is the default branch.
+- **Branching:** `dev` is the default branch. Pull requests are squash-merged, and the PR title becomes the commit message.
+
+## Contributing
+
+Contributions are welcome, especially design review and cloud expertise while the project is in the design stage. Read [CONTRIBUTING.md](CONTRIBUTING.md) to get started, and follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+- Questions and ideas: [Discussions](https://github.com/loriamichaelj/terraform-landing-zone-template-skill/discussions)
+- Bugs, features and design proposals: [Issues](https://github.com/loriamichaelj/terraform-landing-zone-template-skill/issues/new/choose)
+- Security problems: report privately, as described in [SECURITY.md](SECURITY.md)
+- Getting help: [SUPPORT.md](SUPPORT.md)
+
+## License
+
+[Apache License 2.0](LICENSE)

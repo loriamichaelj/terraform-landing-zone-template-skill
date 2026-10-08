@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Ask a question
+    url: https://github.com/loriamichaelj/terraform-landing-zone-template-skill/discussions/categories/q-a
+    about: Questions about using or designing the skill go to Discussions Q&A.
+  - name: Share an idea
+    url: https://github.com/loriamichaelj/terraform-landing-zone-template-skill/discussions/categories/ideas
+    about: Early ideas and open-ended proposals go to Discussions Ideas.
+  - name: Report a vulnerability
+    url: https://github.com/loriamichaelj/terraform-landing-zone-template-skill/security/advisories/new
+    about: Report security problems privately. Please don't open a public issue.

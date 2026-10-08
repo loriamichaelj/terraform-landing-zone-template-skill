@@ -1,0 +1,7 @@
+# Code owners are requested for review automatically. See CONTRIBUTING.md.
+*                 @loriamichaelj
+
+# Pipeline, security policy and decisions get explicit ownership even if the default changes.
+/.github/         @loriamichaelj
+/SECURITY.md      @loriamichaelj
+/docs/ADR.md      @loriamichaelj

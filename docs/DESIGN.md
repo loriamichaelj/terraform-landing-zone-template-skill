@@ -318,7 +318,7 @@ The agent's own infrastructure is defined in Terraform in the same repo and depl
 
 Every resource this repository creates carries the resource manager tag `skills-mjl-27850/name/Terraform-Landing-Zone-Template-Skill` (key `tagKeys/281478640749113`, value `tagValues/281477778372023`). The project is already bound to this tag, so resources inherit it, but each resource is still bound explicitly. That way the tag survives a resource move and shows up in a per-resource audit.
 
-- The tag key is scoped to project `skills-mjl-27850`, so it can only be bound to resources inside that project. Resources in any other project or org (such as P3 sandboxes) need their own tag key.
+- The tag key is parented by project `skills-mjl-27850`, but it also binds to resources elsewhere in `mikejloria-org`: the `dev`, `stage` and `prod` folders carry it (checked 2026-10-07). Resources in a different organization (such as P3 sandboxes) need their own tag key.
 - In `infra/`, look the value up once and bind it on every resource: use the resource's own `tags` argument where the provider supports it, otherwise `google_tags_location_tag_binding` (regional resources such as Cloud Run, Cloud Storage and Firestore) or `google_tags_tag_binding` (global resources).
 - A conftest rule on the `infra/` plan fails CI if any taggable resource has no binding to this value.
 - The tag applies only to this repo's own platform, not to landing zones the agent generates for users.

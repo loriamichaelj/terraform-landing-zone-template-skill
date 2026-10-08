@@ -1,0 +1,54 @@
+name: Feature request
+description: Suggest a capability, a cloud baseline improvement, or a host to support
+title: "feat: "
+labels: [enhancement, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For open-ended ideas, start in [Discussions → Ideas](https://github.com/loriamichaelj/terraform-landing-zone-template-skill/discussions/categories/ideas). Use this form when the need is clear.
+        If the request changes the architecture or a security control, use **Design proposal** instead.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like to happen? Spec fields, commands or output examples help.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: cloud
+    attributes:
+      label: Target cloud
+      multiple: true
+      options: [Not cloud-specific, GCP, Azure, AWS, OpenStack]
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Skill or lzctl
+        - Templates or baseline mapping
+        - Policies (conftest / Rego)
+        - Hosted agent
+        - GitHub workflows / CI
+        - Docs
+        - Other
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I'd like to work on this

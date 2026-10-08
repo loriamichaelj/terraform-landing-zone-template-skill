@@ -1,0 +1,40 @@
+name: Design proposal (ADR)
+description: Propose a change to the architecture, a security control, a baseline choice or a convention
+title: "design: "
+labels: [design, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Design changes are recorded as Architecture Decision Records in [docs/ADR.md](https://github.com/loriamichaelj/terraform-landing-zone-template-skill/blob/dev/docs/ADR.md).
+        Discuss the proposal here; once there's agreement, open a PR that adds the ADR (status **Proposed**) and updates DESIGN.md or CICD.md to match.
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: What's the situation or problem? Link the parts of DESIGN.md, CICD.md or existing ADRs involved.
+    validations:
+      required: true
+  - type: textarea
+    id: decision
+    attributes:
+      label: Proposed decision
+      description: What should we do instead, stated as a decision.
+    validations:
+      required: true
+  - type: textarea
+    id: consequences
+    attributes:
+      label: Consequences
+      description: What gets better, what gets worse, and what has to change (docs, cost, security, other ADRs).
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: input
+    id: supersedes
+    attributes:
+      label: Supersedes or amends
+      description: ADR numbers this would replace or change, if any (for example ADR-007).

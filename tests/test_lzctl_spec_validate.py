@@ -169,6 +169,7 @@ def test_cli_exit_two_for_missing_or_malformed_file(tmp_path):
 
 def test_doctor_reports_required_dependencies():
     result = run_cli("doctor")
+    assert result.stderr == ""  # no deprecation warnings leaking from dependencies
     report = json.loads(result.stdout)
     names = {c["name"] for c in report["checks"]}
     assert {"python>=3.11", "jsonschema", "jinja2", "terraform", "tflint", "trivy", "conftest"} <= names

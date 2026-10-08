@@ -18,6 +18,7 @@ import ipaddress
 import json
 import shutil
 import sys
+from importlib import metadata
 from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
@@ -340,8 +341,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     checks.append({"name": "python>=3.11", "ok": py_ok, "required": True, "detail": sys.version.split()[0]})
     for module, pip_name in (("jsonschema", "jsonschema"), ("jinja2", "jinja2")):
         try:
-            imported = __import__(module)
-            checks.append({"name": module, "ok": True, "required": True, "detail": getattr(imported, "__version__", "installed")})
+            __import__(module)
+            checks.append({"name": module, "ok": True, "required": True, "detail": metadata.version(pip_name)})
         except ImportError:
             checks.append({"name": module, "ok": False, "required": True, "detail": f"pip install {pip_name}"})
     for tool, purpose in TOOLS.items():

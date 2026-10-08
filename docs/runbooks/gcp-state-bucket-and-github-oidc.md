@@ -9,7 +9,7 @@ How the Terraform state bucket and the GitHub Actions OIDC trust in project `ski
 | IAM OIDC identity provider for `token.actions.githubusercontent.com` | Workload identity pool + OIDC provider | Pool `github`, provider `github-actions` |
 | Provider-wide audience/thumbprint checks | Provider attribute condition | `assertion.repository_owner_id == '165821667'` (account `loriamichaelj`) |
 | IAM role | Service account | `lz-bootstrap-sa`, `lz-dev-sa` |
-| Role trust policy with `token.actions.githubusercontent.com:sub` condition | `roles/iam.workloadIdentityUser` on the service account, granted to one `subject` | `repo:loriamichaelj/terraform-landing-zone-template-skill:environment:<env>` |
+| Role trust policy with `token.actions.githubusercontent.com:sub` condition | `roles/iam.workloadIdentityUser` on the service account, granted to one `subject` | `repo:loriamichaelj@165821667/terraform-landing-zone-template-skill@1409542604:environment:<env>` |
 | Permissions policy on the role | IAM roles granted to the service account | `roles/storage.objectUser` on the state bucket |
 | `aws-actions/configure-aws-credentials` with `role-to-assume` | `google-github-actions/auth` with `workload_identity_provider` + `service_account` | GitHub environment variables (below) |
 
@@ -26,6 +26,23 @@ How the Terraform state bucket and the GitHub Actions OIDC trust in project `ski
 
 Each GitHub environment has these variables: `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`, `TF_STATE_BUCKET`, `TF_STATE_PREFIX` (`bootstrap` or `dev`).
 
+## The subject claim
+
+This repo uses GitHub's **immutable subject** format, which puts the owner and repo IDs in `sub`:
+
+```
+repo:loriamichaelj@165821667/terraform-landing-zone-template-skill@1409542604:environment:dev
+```
+
+A binding to the older name-only format (`repo:loriamichaelj/terraform-landing-zone-template-skill:environment:dev`) never matches, and the job fails with `Permission 'iam.serviceAccounts.getAccessToken' denied`. Check the format GitHub uses with:
+
+```bash
+gh api repos/loriamichaelj/terraform-landing-zone-template-skill/actions/oidc/customization/sub
+# {"use_default":true,"use_immutable_subject":true,"sub_claim_prefix":"repo:loriamichaelj@165821667/terraform-landing-zone-template-skill@1409542604"}
+```
+
+Because the IDs never change, renaming the repo or account, or someone recreating it under the same name, can't take over the trust. The **Ops: OIDC check** workflow prints the live claims in its first step.
+
 ## Recreate by hand
 
 Run in bash. In zsh, write `${REPO}` (with braces) wherever a colon follows a variable: zsh reads `$REPO:e…` as a history modifier and silently mangles the value.
@@ -37,6 +54,7 @@ B=skills-mjl-27850-tlz-tfstate
 L=us-central1
 REPO=loriamichaelj/terraform-landing-zone-template-skill
 OWNER_ID=$(gh api repos/${REPO} --jq .owner.id)
+SUB_PREFIX=$(gh api repos/${REPO}/actions/oidc/customization/sub --jq .sub_claim_prefix)
 TAG=skills-mjl-27850/name/Terraform-Landing-Zone-Template-Skill
 
 # 1. APIs
@@ -65,7 +83,7 @@ for e in bootstrap dev; do
   gcloud iam service-accounts create "lz-${e}-sa" --project=$P --display-name="TLZ GitHub ${e}"
   # New service accounts take a few seconds to propagate; retry the next commands if they say "does not exist"
   gcloud iam service-accounts add-iam-policy-binding "$SA" --role=roles/iam.workloadIdentityUser \
-    --member="principal://iam.googleapis.com/projects/${N}/locations/global/workloadIdentityPools/github/subject/repo:${REPO}:environment:${e}"
+    --member="principal://iam.googleapis.com/projects/${N}/locations/global/workloadIdentityPools/github/subject/${SUB_PREFIX}:environment:${e}"
   gcloud storage buckets add-iam-policy-binding gs://${B} --member="serviceAccount:${SA}" \
     --role=roles/storage.objectUser
   UID_=$(gcloud iam service-accounts describe "$SA" --format='value(uniqueId)')
@@ -145,4 +163,10 @@ gcloud resource-manager tags bindings list \
   --parent=//storage.googleapis.com/projects/_/buckets/skills-mjl-27850-tlz-tfstate --location=us-central1
 ```
 
-An end-to-end check needs a workflow run: a job in environment `dev` should authenticate and `terraform init` against the bucket, and the same job with no `environment:` should fail at the auth step.
+End to end, run **Ops: OIDC check** (`gh workflow run ops-oidc-check.yml -f environment=dev`, or `bootstrap`). It passes only if all three jobs pass:
+
+- The job in the chosen environment authenticates, writes and reads the bucket, and runs Terraform init and apply on the GCS backend.
+- A job with no environment is refused.
+- A job asking for the other environment's service account is refused.
+
+Both environments passed on 2026-10-07.

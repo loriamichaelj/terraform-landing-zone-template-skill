@@ -158,7 +158,7 @@ Statuses: **Proposed** (in the design, awaiting reviewer sign-off) · **Accepted
 
 **Decision.**
 - **Trust:** workload identity pool `github` with OIDC provider `github-actions`. The provider only accepts tokens whose `repository_owner_id` is `165821667` (`loriamichaelj`), so other skill repos from the same account can reuse the pool.
-- **Roles:** one service account per GitHub environment (`lz-bootstrap-sa`, `lz-dev-sa`). Each can be impersonated only by the exact subject `repo:loriamichaelj/terraform-landing-zone-template-skill:environment:<env>`, the same check an AWS trust policy makes on `sub`.
+- **Roles:** one service account per GitHub environment (`lz-bootstrap-sa`, `lz-dev-sa`). Each can be impersonated only by the exact subject `repo:loriamichaelj@165821667/terraform-landing-zone-template-skill@1409542604:environment:<env>`, the same check an AWS trust policy makes on `sub`. The subject uses GitHub's immutable format (owner and repo IDs), so renaming or recreating the repo can't take over the trust. The first bindings used the name-only format and were refused; they were corrected on 2026-10-07.
 - **State:** one bucket, `skills-mjl-27850-tlz-tfstate` (us-central1). It has versioning, keeps up to 10 noncurrent versions for at most 90 days, enforces uniform access and public access prevention, and uses one prefix per environment. Both service accounts have `roles/storage.objectUser` on it.
 - **Tags:** the bucket and both service accounts carry the ADR-012 tag. The pool and provider are global resources that can't take tags.
 
@@ -169,6 +169,7 @@ This replaces the single `lz-ci-sa` in DESIGN.md with per-environment accounts. 
 - Both accounts can read each other's state prefix. Split into one bucket per environment if that becomes a problem.
 - The state bucket uses Google-managed encryption, not the CMEK required in DESIGN.md for agent data. Revisit when the KMS keyring exists.
 - Neither account has any infrastructure permissions yet. Grant them per environment as `infra/` is written, and add required reviewers to an environment before giving its account write access.
+- Verified 2026-10-07 by **Ops: OIDC check** in both environments. Each environment's job authenticated and ran Terraform against the bucket. A job with no environment, and a job asking for the other environment's account, were both refused.
 
 ## ADR-014: Secrets in Secret Manager encrypted with our KMS key; GitHub environment secrets only for CI
 

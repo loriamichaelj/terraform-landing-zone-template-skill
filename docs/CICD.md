@@ -1,6 +1,6 @@
 # CI/CD Strategy: Terraform Landing Zone Agent
 
-Oct 7, 2026 · Status: **Proposed** ([ADR-015](ADR.md#adr-015-cicd-strategy-and-workflow-naming)) · Built so far: the OIDC check workflow
+Oct 7, 2026 · Status: **Proposed** ([ADR-015](ADR.md#adr-015-cicd-strategy-and-workflow-naming)) · Built so far: the OIDC check workflow (passing in `dev` and `bootstrap`)
 
 This covers how code in this repo is tested, released and deployed: branches, environments, the workflow inventory, naming conventions and the actions policy. It's the detail behind the Pipeline section of [DESIGN.md](DESIGN.md).
 
@@ -39,7 +39,7 @@ Until `main` exists, `dev` is both trunk and the only deploy target. Promotion t
 
 | File | Display name | Category | Trigger | Environment | Phase | Status |
 | --- | --- | --- | --- | --- | --- | --- |
-| `ops-oidc-check.yml` | Ops: OIDC check | ops | Manual; push to the file | `dev` or `bootstrap` | Now | **Built** |
+| `ops-oidc-check.yml` | Ops: OIDC check | ops | Manual; push to the file | `dev` or `bootstrap` | Now | **Built, passing** |
 | `ci-docs.yml` | CI: Docs | ci | Pull request touching `**.md` | none | Now | Planned |
 | `ci-workflows.yml` | CI: Workflows | ci | Pull request touching `.github/**` | none | Now | Planned |
 | `ci-terraform.yml` | CI: Terraform | ci | Pull request touching `infra/**` | `dev-plan` | P0 | Planned |

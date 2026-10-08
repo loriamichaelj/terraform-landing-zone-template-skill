@@ -171,6 +171,15 @@ def test_zip_checks_its_own_render(extracted, tmp_path):
     spec = VALID_DIR / "standard.spec.json"
     assert run(extracted / "scripts/lzctl", "render", str(spec), "--out", str(out)).returncode == 0
     result = run(extracted / "scripts/lzctl", "check", str(out))
-    assert result.returncode in (0, 1), result.stderr
-    report = json.loads(result.stdout)
-    assert isinstance(report, (dict, list))
+    assert result.returncode == 0, result.stdout + result.stderr
+    checks = {c["name"]: c["status"] for c in json.loads(result.stdout)["checks"]}
+    assert checks["integrity"] == "passed" and checks["upstream-schemas"] == "passed"
+    # The policy pack ships inside the zip; with conftest installed it must run from the extracted copy.
+    assert checks["conftest"] == ("passed" if shutil.which("conftest") else "skipped")
+
+
+def test_zip_ships_the_policy_pack_and_the_generated_doc_templates(archive):
+    names = set(zipfile.ZipFile(archive).namelist())
+    assert "landing-zone/policies/gcp/landing_zone.rego" in names
+    assert "landing-zone/templates/gcp/fast-v59.0.0/overlay/README.md.j2" in names
+    assert "landing-zone/templates/gcp/fast-v59.0.0/overlay/decision-log.md.j2" in names

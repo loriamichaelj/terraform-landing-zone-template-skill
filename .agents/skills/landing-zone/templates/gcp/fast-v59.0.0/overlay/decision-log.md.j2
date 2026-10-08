@@ -1,0 +1,13 @@
+# Decision log
+
+Each row is a value in the landing zone spec that was chosen by default or on the user's behalf, with the reason. A `user` row came from the requirements conversation; a `default` row is the profile's default.
+
+{% if decisions %}
+| # | Spec field | Value | Why | Source |
+| --- | --- | --- | --- | --- |
+{% for d in decisions %}
+| {{ loop.index }} | `{{ d.field | code }}` | {{ d.value | md }} | {{ d.rationale | md }} | {{ d.source | md }} |
+{% endfor %}
+{% else %}
+The spec records no decisions. Every value came directly from the spec file.
+{% endif %}

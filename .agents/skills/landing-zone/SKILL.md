@@ -23,14 +23,14 @@ You collect requirements and produce a **landing zone spec** (JSON). You choose 
 3. **Write the spec** to a file, for example `landing-zone.spec.json`.
 4. **Validate:** run `scripts/lzctl spec validate landing-zone.spec.json`. Each finding names the spec field to change (`path`). Fix the spec and re-run. After 3 failed rounds, stop and show the findings to the user.
 5. **Render:** run `scripts/lzctl render landing-zone.spec.json --out <empty dir>`. Read `not_rendered_yet` in the output and tell the user which parts of their requirements are not in the configuration yet.
-6. **Check:** run `scripts/lzctl check <out dir>`. For each finding run `scripts/lzctl explain <out dir>`: its `cause.spec_fields` name the spec fields to change, then re-render into an empty directory. Never edit rendered files. If `cause.kind` is not `spec` (`integrity`, `vendored`, `template`, `baseline`), the spec is not the problem: say so and stop instead of guessing. Checks reported `not_applicable` have not run; say so rather than calling the output fully validated.
-7. **Confirm** the spec, the render report, the check result and the decision log with the user.
+6. **Check:** run `scripts/lzctl check <out dir>`. For each finding run `scripts/lzctl explain <out dir>`: its `cause.spec_fields` name the spec fields to change, then re-render into an empty directory. Never edit rendered files. If `cause.kind` is not `spec` (`integrity`, `vendored`, `template`, `baseline`), the spec is not the problem: say so and stop instead of guessing. Checks reported `not_applicable` or `skipped` have not run; say so rather than calling the output fully validated. When the check is clean, run `scripts/lzctl check <out dir> --write-report` to write `validation-report.md` into the directory.
+7. **Confirm** the spec, `README.md`, `decision-log.md`, the render report and the validation report with the user. They are in the output directory; the user opens the pull request.
 
-Run `scripts/lzctl doctor` first if `lzctl` fails to start. It needs Python 3.11+ and the `jsonschema`, `jinja2` and `PyYAML` packages.
+Run `scripts/lzctl doctor` first if `lzctl` fails to start. If `scripts/lzctl` is not executable, run it as `python3 scripts/lzctl`. It needs Python 3.11+ and the `jsonschema`, `jinja2` and `PyYAML` packages.
 
 ## Status
 
-Implemented: `lzctl spec validate`, `render` (GCP `0-org-setup` dataset and, for `hub_spoke` with `peering`, the `2-networking` stage; `starter` and `standard` profiles), `check` (integrity, upstream schemas, `terraform fmt`; trivy and checkov once HCL is rendered), `explain`, `doctor`. Not yet: the security dataset, the `single` topology, `ncc`, `nva` and `vpn` connectivity, the `regulated` profile (render refuses it). The output today is a validated spec and a rendered dataset, not a pull request.
+Implemented: `lzctl spec validate`, `render` (GCP `0-org-setup` dataset and, for `hub_spoke` with `peering`, the `2-networking` stage; `starter` and `standard` profiles), `check` (integrity, upstream schemas, `terraform fmt`, the conftest policy pack; trivy and checkov once HCL is rendered; `--write-report`), `explain`, `doctor`. Every render includes a `README.md` and a `decision-log.md`. Not yet: the security dataset, the `single` topology, `ncc`, `nva` and `vpn` connectivity, the `regulated` profile (render refuses it). The output today is a validated spec and a rendered configuration directory (with a README, decision log and validation report), not a pull request.
 
 ## References
 

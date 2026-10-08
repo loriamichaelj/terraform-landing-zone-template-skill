@@ -1,0 +1,49 @@
+# Landing zone configuration for {{ domain | md }}
+
+This directory is the output of `lzctl render` for a {{ profile | md }} landing zone on Google Cloud. It is configuration data for the Cloud Foundation Fabric FAST baseline {{ baseline_tag | md }}, not a deployed landing zone: nothing has been created in any cloud, and `lzctl` never runs `terraform apply`.
+
+Do not edit these files by hand. Change the landing zone spec and render again into an empty directory; `lzctl check` reports any file that no longer matches `render-report.json`.
+
+## What was configured
+
+| Item | Value |
+| --- | --- |
+| Organization | {{ domain | md }} ({{ organization_id | md }}) |
+| Profile | {{ profile | md }} |
+| Environments | {{ environments | join(", ") | md }} |
+| Network topology | {{ topology | md }} |
+| Regions | {{ regions | join(", ") | md }} |
+| Baseline | Cloud Foundation Fabric FAST {{ baseline_tag | md }} (commit {{ baseline_commit | md }}) |
+
+`decision-log.md` records every value that was chosen by default or on the user's behalf, with the reason.
+
+## What is not in this configuration yet
+
+{% if not_rendered %}
+The spec asks for the following, but this version of the skill does not turn it into configuration. Plan for it separately.
+
+| Spec field | Needs |
+| --- | --- |
+{% for field, needs in not_rendered %}
+| `{{ field | code }}` | {{ needs | md }} |
+{% endfor %}
+{% else %}
+Every field in the spec is reflected in the configuration.
+{% endif %}
+
+## Layout
+
+- `datasets/` is the `0-org-setup` stage: organization, folders, projects, tags, org policies and the audit log project.
+{% if has_networking %}
+- `2-networking/` is the networking stage: the hub and spoke VPCs, subnets and firewall rules, with a fixed CIDR plan.
+{% endif %}
+- `*.auto.tfvars` point each stage at its dataset.
+- `render-report.json` lists every file with its SHA-256, the output hash, the baseline commit and which spec fields drive each file.
+- `decision-log.md` is the record of choices.
+
+## How to review and use it
+
+1. Run `lzctl check .` in this directory. It verifies file integrity, validates the YAML against the baseline's own schemas, runs the policy pack and runs any scanner that is installed. A check reported `not_applicable` or `skipped` has not run, so the output is not fully validated until it does.
+2. Run `lzctl check . --write-report` to write `validation-report.md` here, so the result travels with the pull request.
+3. Open a pull request with this directory in your foundation repository. Approval and `terraform apply` are your existing, human-approved pipeline's job.
+4. To change anything, edit the spec, render into a new empty directory and check again.

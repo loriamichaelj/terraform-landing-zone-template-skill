@@ -25,6 +25,9 @@ concurrency:
 env:
   TERRAFORM_VERSION: 1.16.5
   CHECKOV_VERSION: 3.3.26
+  CONFTEST_VERSION: 0.71.1
+  # SHA-256 of conftest_0.71.1_Linux_x86_64.tar.gz, from the release asset's digest.
+  CONFTEST_SHA256: c3f6b2a753bd56e377a1e51a95ae3e057f926f2e9139f7d5b5dfbbaf810f7985
 
 jobs:
   test:
@@ -60,6 +63,16 @@ jobs:
         with:
           version: v0.75.0
 
+      - name: Install conftest
+        run: |
+          archive="conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz"
+          curl -fsSLo "${RUNNER_TEMP}/${archive}" \
+            "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/${archive}"
+          echo "${CONFTEST_SHA256}  ${RUNNER_TEMP}/${archive}" | sha256sum --check --strict
+          mkdir -p "${RUNNER_TEMP}/bin"
+          tar -xzf "${RUNNER_TEMP}/${archive}" -C "${RUNNER_TEMP}/bin" conftest
+          echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+
       - name: Install Python dependencies
         run: python -m pip install -r tests/requirements.txt "checkov==${CHECKOV_VERSION}"
 
@@ -68,7 +81,7 @@ jobs:
 
       - name: Run the tests
         env:
-          # Makes a missing terraform, trivy or checkov a failure instead of a skipped test.
+          # Makes a missing terraform, trivy, checkov or conftest a failure instead of a skipped test.
           REQUIRE_TOOLS: "1"
         run: python -m pytest tests -rs
 

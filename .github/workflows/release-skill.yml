@@ -1,0 +1,76 @@
+# Builds the release zip of the landing-zone skill and publishes it as a GitHub Release (ADR-027).
+# Conventions: docs/CICD.md. Reproduce locally: python tools/build_skill_zip.py --version X.Y.Z
+name: "Release: Skill"
+run-name: "Release skill ${{ github.ref_name }}"
+
+on:
+  push:
+    tags: ["skill-v*"]
+
+permissions: {}
+
+concurrency:
+  group: release-skill-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish the zip
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require a tagged commit that is on dev
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          [[ "${TAG}" =~ ^skill-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "tag must look like skill-v1.2.3, got ${TAG}"; exit 1; }
+          git merge-base --is-ancestor "${GITHUB_SHA}" origin/dev || { echo "${TAG} is not on dev"; exit 1; }
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Install Python dependencies
+        run: python -m pip install -r tests/requirements.txt
+
+      - name: Build the zip twice and require identical bytes
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#skill-v}"
+          python tools/build_skill_zip.py --version "${version}" --out "${RUNNER_TEMP}/dist"
+          python tools/build_skill_zip.py --version "${version}" --out "${RUNNER_TEMP}/dist-again"
+          cmp "${RUNNER_TEMP}/dist/landing-zone-${version}.zip" "${RUNNER_TEMP}/dist-again/landing-zone-${version}.zip"
+
+      - name: Test the zip against the repository
+        run: python -m pytest tests/test_skill_zip.py -q
+
+      - name: Check the extracted zip
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#skill-v}"
+          mkdir "${RUNNER_TEMP}/extracted"
+          unzip -q "${RUNNER_TEMP}/dist/landing-zone-${version}.zip" -d "${RUNNER_TEMP}/extracted"
+          python "${RUNNER_TEMP}/extracted/landing-zone/scripts/lzctl" doctor --format text
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#skill-v}"
+          zip="${RUNNER_TEMP}/dist/landing-zone-${version}.zip"
+          sha256="${zip}.sha256"
+          gh release create "${TAG}" "${zip}" "${sha256}" --verify-tag \
+            --title "Landing zone skill ${version}" \
+            --notes "Agent Skill package. Unzip it into a skills folder (for example .agents/skills/) or upload it to an AI platform that accepts a zipped skill. Verify the download against the .sha256 file, then run scripts/lzctl doctor."

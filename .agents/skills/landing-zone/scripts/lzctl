@@ -95,14 +95,18 @@ DEFERRED_GCP = {
 }
 
 REPORT_NAME = "render-report.json"
+VALIDATION_REPORT = "validation-report.md"  # written by `check --write-report`; not part of the render
 SCHEMA_DECLARATION = re.compile(rb"yaml-language-server: \$schema=\S*?([\w-]+\.schema\.json)")
 
 # Checks the design calls for that have nothing to run on yet. Reported, never counted as passed.
 NOT_APPLICABLE = {
     "terraform-validate": "needs the FAST stage module, which is not vendored; the output is data files only",
     "tflint": "no HCL is rendered yet",
-    "conftest": "no policy pack yet",
 }
+
+# Policy pack: conftest runs the rules in policies/<cloud>/ over the rendered YAML (ADR-028).
+POLICY_DIR = SKILL_DIR / "policies"
+POLICY_TARGETS = ("datasets", "2-networking/datasets")
 
 # Misconfiguration scanners. They run on rendered .tf files and are not_applicable until some exist (ADR-022).
 SCAN_TIMEOUT = 120
@@ -340,6 +344,20 @@ def _render_networking(spec: dict, root: Path, manifest: dict, render, baseline:
     return output, sources
 
 
+def _md(value: object) -> str:
+    """Make a spec value safe for a markdown table cell: no table breaks, no HTML, no emphasis or code."""
+    text = value if isinstance(value, str) else json.dumps(value, sort_keys=True, ensure_ascii=False)
+    for char in ("\\", "|", "`", "*", "_", "[", "]", "<", ">", "&"):
+        text = text.replace(char, "&" + {"&": "amp", "<": "lt", ">": "gt"}[char] + ";" if char in "&<>" else "\\" + char)
+    return text
+
+
+def _md_code(value: object) -> str:
+    """Make a spec value safe inside a markdown code span in a table cell."""
+    text = value if isinstance(value, str) else json.dumps(value, sort_keys=True, ensure_ascii=False)
+    return text.replace("`", "'").replace("|", "\\|")
+
+
 def render_spec(spec: dict) -> tuple[dict[str, bytes], dict]:
     """Return ({relative path: bytes}, report). Pure: same spec and skill version, same bytes."""
     try:
@@ -368,6 +386,8 @@ def render_spec(spec: dict) -> tuple[dict[str, bytes], dict]:
         keep_trailing_newline=True,
         autoescape=False,
     )
+    env.filters["md"] = _md
+    env.filters["code"] = _md_code
 
     def render(template: str, **values) -> bytes:
         return env.get_template(template).render(**values).encode("utf-8")
@@ -435,8 +455,6 @@ def render_spec(spec: dict) -> tuple[dict[str, bytes], dict]:
         output.update(net_files)
         sources.update(net_sources)
 
-    digests = {path: _sha256(data) for path, data in sorted(output.items())}
-    output_hash = _output_hash(digests)
     deferred = {field: stage for field, stage in DEFERRED_GCP.items() if _present(spec, field)}
     if not_networking is not None:
         for field in NETWORK_FIELDS:
@@ -444,6 +462,28 @@ def render_spec(spec: dict) -> tuple[dict[str, bytes], dict]:
                 deferred[field] = not_networking
         if spec["network"]["regions"][1:]:
             deferred["network.regions[1:]"] = not_networking
+
+    # The README and the decision log are rendered files like any other: hashed, and protected by `check`.
+    output["README.md"] = render(
+        "README.md.j2",
+        domain=spec["organization"]["domain"],
+        organization_id=spec["organization"]["id"],
+        profile=spec["target"]["profile"],
+        environments=selected,
+        topology=spec["network"]["topology"],
+        regions=spec["network"]["regions"],
+        baseline_tag=manifest["tag"],
+        baseline_commit=manifest["commit"][:12],
+        not_rendered=sorted(deferred.items()),
+        has_networking=not_networking is None,
+    )
+    output["decision-log.md"] = render("decision-log.md.j2", decisions=spec.get("decisions", []))
+    sources["README.md"] = sorted({"hierarchy.environments", "network.regions", "network.topology", "organization.domain",
+                                   "organization.id", "target.baseline_version", "target.profile", *deferred})
+    sources["decision-log.md"] = ["decisions"]
+
+    digests = {path: _sha256(data) for path, data in sorted(output.items())}
+    output_hash = _output_hash(digests)
     report = {
         "baseline": {"cloud": cloud, "tag": manifest["tag"], "commit": manifest["commit"], "dataset": baseline["dataset"]},
         "output_hash": output_hash,
@@ -534,7 +574,7 @@ def _integrity_findings(report: dict, on_disk: dict[str, Path], links: list[str]
     expected = report["files"]
     for relative in sorted(set(expected) - set(on_disk)):
         findings.append(_finding("check.integrity.missing", relative, "listed in the render report but not on disk"))
-    for relative in sorted(set(on_disk) - set(expected) - {REPORT_NAME}):
+    for relative in sorted(set(on_disk) - set(expected) - {REPORT_NAME, VALIDATION_REPORT}):
         findings.append(_finding("check.integrity.extra", relative, "on disk but not in the render report; only `lzctl render` may create files"))
     for relative in sorted(set(expected) & set(on_disk)):
         if _sha256(on_disk[relative].read_bytes()) != expected[relative]:
@@ -700,6 +740,42 @@ def _hcl_scans(directory: Path, on_disk: dict[str, Path]) -> tuple[list[dict], l
     return checks, findings
 
 
+def _policy_check(directory: Path, report: dict, on_disk: dict[str, Path], unparsable: bool) -> tuple[dict, list[dict]]:
+    """Run the cloud's conftest policy pack over the rendered YAML datasets."""
+    cloud = report["baseline"]["cloud"]
+    pack = POLICY_DIR / cloud
+    if not pack.is_dir():
+        return _check_result("conftest", "not_applicable", f"no policy pack for {cloud}"), []
+    targets = [t for t in POLICY_TARGETS if any(p.startswith(t + "/") and p.endswith((".yaml", ".yml")) for p in on_disk)]
+    if not targets:
+        return _check_result("conftest", "not_applicable", "no YAML datasets in the rendered output"), []
+    if unparsable:
+        return _check_result("conftest", "skipped", "some YAML files do not parse; fix those findings first"), []
+    exe = shutil.which("conftest")
+    if exe is None:
+        return _check_result("conftest", "skipped", "conftest is not installed"), []
+    argv = [exe, "test", "--policy", str(pack), "--combine", "--parser", "yaml", "--output", "json", "--no-color", *targets]
+    proc = _run_scanner(argv, directory, {})
+    if isinstance(proc, str):
+        return _scanner_error("conftest", proc)
+    # conftest exits 1 when a rule denies; anything else non-zero is an error.
+    if proc.returncode not in (0, 1):
+        return _scanner_error("conftest", (proc.stderr.strip().splitlines() or [f"exit {proc.returncode}"])[0])
+    try:
+        results = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return _scanner_error("conftest", "output was not a conftest JSON report")
+    findings = []
+    for result in results if isinstance(results, list) else []:
+        for failure in result.get("failures") or []:
+            meta = failure.get("metadata") or {}
+            findings.append(_finding(f"check.conftest.{meta.get('rule', 'policy')}", str(meta.get("path", ".")), str(failure.get("msg", ""))))
+    rules = sum(r.get("successes", 0) + len(r.get("failures") or []) for r in results if isinstance(r, dict))
+    if findings:
+        return _check_result("conftest", "failed", f"{len(findings)} finding(s)"), findings
+    return _check_result("conftest", "passed", f"{rules} policy rules passed"), []
+
+
 def check_output(directory: Path) -> tuple[list[dict], list[dict]]:
     """Verify a rendered directory. Returns (checks, findings); findings is empty when clean."""
     report = _load_report(directory)
@@ -717,10 +793,56 @@ def check_output(directory: Path) -> tuple[list[dict], list[dict]]:
     checks.append(fmt_check)
     scans, scan_findings = _hcl_scans(directory, on_disk)
     checks += scans
+    policy_check, policy = _policy_check(directory, report, on_disk, any(f["rule"] == "check.yaml.parse" for f in schema))
+    checks.append(policy_check)
     checks += [_check_result(name, "not_applicable", reason) for name, reason in NOT_APPLICABLE.items()]
 
-    findings = sorted(integrity + schema + fmt + scan_findings, key=lambda f: (f["path"], f["rule"], f["message"]))
+    findings = sorted(integrity + schema + fmt + scan_findings + policy, key=lambda f: (f["path"], f["rule"], f["message"]))
     return checks, findings
+
+
+def validation_report(report: dict, checks: list[dict], findings: list[dict]) -> str:
+    """The check result as markdown, to travel with the pull request. Deterministic: no timestamps."""
+    did_not_run = [c for c in checks if c["status"] in ("not_applicable", "skipped")]
+    if findings:
+        verdict = f"**Failed:** {len(findings)} finding(s)."
+    elif did_not_run:
+        verdict = (f"**Passed, but not fully validated:** {len(did_not_run)} check(s) did not run "
+                   "(see below), so the output is not fully validated.")
+    else:
+        verdict = "**Passed:** every check ran and found nothing."
+    baseline = report["baseline"]
+    lines = [
+        "# Validation report",
+        "",
+        f"Written by `lzctl check` for output hash `{report['output_hash']}`, rendered from "
+        f"{_md(baseline.get('tag', 'an unknown baseline'))}. Run `lzctl check` on the directory to reproduce it.",
+        "",
+        verdict,
+        "",
+        "## Checks",
+        "",
+        "| Check | Status | Detail |",
+        "| --- | --- | --- |",
+    ]
+    lines += [f"| {_md(c['name'])} | {_md(c['status'])} | {_md(c['detail'])} |" for c in checks]
+    lines += ["", "## Findings", ""]
+    if findings:
+        lines += ["| Rule | File | Message |", "| --- | --- | --- |"]
+        lines += [f"| `{_md_code(f['rule'])}` | `{_md_code(f['path'])}` | {_md(f['message'])} |" for f in findings]
+    else:
+        lines.append("None.")
+    lines += ["", "## What has not been validated", ""]
+    if did_not_run:
+        lines += ["These checks did not run. A check that did not run is not a pass.", ""]
+        lines += [f"- {_md(c['name'])} ({_md(c['status'])}): {_md(c['detail'])}" for c in did_not_run]
+    else:
+        lines.append("Every check ran.")
+    deferred = report.get("not_rendered_yet") or {}
+    if deferred:
+        lines += ["", "Spec fields that are not in the configuration yet (see `README.md`):", ""]
+        lines += [f"- `{_md_code(field)}`: {_md(needs)}" for field, needs in sorted(deferred.items())]
+    return "\n".join(lines) + "\n"
 
 
 def cmd_check(args: argparse.Namespace) -> int:
@@ -731,6 +853,8 @@ def cmd_check(args: argparse.Namespace) -> int:
         checks, findings = check_output(directory)
     except CheckError as exc:
         return _fail(str(exc))
+    if args.write_report:
+        (directory / VALIDATION_REPORT).write_text(validation_report(_load_report(directory), checks, findings), encoding="utf-8")
 
     if args.format == "json":
         print(json.dumps({"ok": not findings, "checks": checks, "findings": findings}, indent=2, sort_keys=True))
@@ -892,6 +1016,7 @@ def build_parser() -> argparse.ArgumentParser:
     check = sub.add_parser("check", help="verify a rendered directory")
     check.add_argument("dir", help="directory written by `lzctl render`")
     check.add_argument("--format", choices=["json", "text"], default="json")
+    check.add_argument("--write-report", action="store_true", help=f"write {VALIDATION_REPORT} into the directory")
     check.set_defaults(func=cmd_check)
 
     explain = sub.add_parser("explain", help="map findings back to spec fields")

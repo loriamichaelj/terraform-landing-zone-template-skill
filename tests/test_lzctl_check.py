@@ -197,7 +197,7 @@ def test_ci_has_every_tool_installed():
     """CI sets REQUIRE_TOOLS so a broken tool install fails the job instead of silently skipping tests."""
     if not os.environ.get("REQUIRE_TOOLS"):
         pytest.skip("REQUIRE_TOOLS not set")
-    missing = [tool for tool in ("terraform", "trivy", "checkov") if not shutil.which(tool)]
+    missing = [tool for tool in ("terraform", "trivy", "checkov", "conftest") if not shutil.which(tool)]
     assert not missing, f"not installed: {missing}"
 
 

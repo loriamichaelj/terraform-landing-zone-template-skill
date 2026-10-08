@@ -1,0 +1,67 @@
+# Lints the workflows themselves: syntax (actionlint), security (zizmor) and this repo's rules (docs/CICD.md).
+# Reproduce locally: actionlint && zizmor .github/workflows && python tools/check_workflows.py
+name: "CI: Workflows"
+run-name: "Workflows (${{ github.event_name }})"
+
+on:
+  # No path filter on pull requests, so this can become a required status check.
+  pull_request:
+  push:
+    branches: [dev]
+    paths:
+      - .github/**
+      - tools/check_workflows.py
+
+permissions: {}
+
+concurrency:
+  group: ci-workflows-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ACTIONLINT_VERSION: 1.7.12
+  # SHA-256 of actionlint_1.7.12_linux_amd64.tar.gz, from the release's checksums file.
+  ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+  ZIZMOR_VERSION: 1.30.1
+
+jobs:
+  lint:
+    name: Lint workflows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Install actionlint
+        run: |
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSLo "${RUNNER_TEMP}/${archive}" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${archive}"
+          echo "${ACTIONLINT_SHA256}  ${RUNNER_TEMP}/${archive}" | sha256sum --check --strict
+          mkdir -p "${RUNNER_TEMP}/bin"
+          tar -xzf "${RUNNER_TEMP}/${archive}" -C "${RUNNER_TEMP}/bin" actionlint
+          echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+
+      - name: Install zizmor and PyYAML
+        run: python -m pip install "zizmor==${ZIZMOR_VERSION}" -r tests/requirements.txt
+
+      - name: Run actionlint
+        run: actionlint -color
+
+      - name: Run zizmor
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: zizmor --no-progress .github/workflows
+
+      - name: Check the repo's workflow rules
+        run: python tools/check_workflows.py

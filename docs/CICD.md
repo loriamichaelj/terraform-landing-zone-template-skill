@@ -1,6 +1,6 @@
 # CI/CD Strategy: Terraform Landing Zone Agent
 
-Oct 7, 2026 · Status: **Proposed** ([ADR-015](ADR.md#adr-015-cicd-strategy-and-workflow-naming)) · Built so far: the OIDC check workflow (passing in `dev` and `bootstrap`) and CI: Skill
+Oct 7, 2026 · Status: **Proposed** ([ADR-015](ADR.md#adr-015-cicd-strategy-and-workflow-naming)) · Built so far: the OIDC check workflow (passing in `dev` and `bootstrap`) CI: Skill and CI: Workflows
 
 This covers how code in this repo is tested, released and deployed: branches, environments, the workflow inventory, naming conventions and the actions policy. It's the detail behind the Pipeline section of [DESIGN.md](DESIGN.md).
 
@@ -43,7 +43,7 @@ Until `main` exists, `dev` is both trunk and the only deploy target. Promotion t
 | --- | --- | --- | --- | --- | --- | --- |
 | `ops-oidc-check.yml` | Ops: OIDC check | ops | Manual; push to the file | `dev` or `bootstrap` | Now | **Built, passing** |
 | `ci-docs.yml` | CI: Docs | ci | Pull request touching `**.md` | none | Now | Planned |
-| `ci-workflows.yml` | CI: Workflows | ci | Pull request touching `.github/**` | none | Now | Planned |
+| `ci-workflows.yml` | CI: Workflows | ci | Every pull request; push to `dev` touching `.github/**` | none | Now | **Built** |
 | `ci-terraform.yml` | CI: Terraform | ci | Pull request touching `infra/**` | `dev-plan` | P0 | Planned |
 | `ci-skill.yml` | CI: Skill | ci | Every pull request; push to `dev` touching the skill, tests, evals or tools | none | P0 | **Built** |
 | `ci-evals.yml` | CI: Evals smoke | ci | Pull request touching skill, agent or templates | `dev` | P0 | Planned |
@@ -58,7 +58,7 @@ Until `main` exists, `dev` is both trunk and the only deploy target. Promotion t
 **What each check runs**
 
 - **CI: Docs:** markdown lint, link check, and the repo's content rules.
-- **CI: Workflows:** actionlint, zizmor (workflow security audit) and the SHA-pinning check.
+- **CI: Workflows:** actionlint, zizmor (workflow security audit, online so it also checks pinned SHAs against their repos) and `tools/check_workflows.py`, which enforces this document: file and workflow names, `permissions: {}`, job timeouts, `ubuntu-24.04`, SHA pins with a version comment, allowed publishers, and no `pull_request_target`. actionlint is downloaded and verified against a pinned SHA-256, so no third-party action is needed. Like CI: Skill it has no path filter on pull requests.
 - **CI: Terraform:** `terraform fmt -check`, `validate`, tflint, trivy, checkov, conftest (including the ADR-012 tag rule), then `plan`, posted as a PR comment.
 - **CI: Skill:** `pip install -r tests/requirements.txt && python -m pytest tests`: `lzctl` unit tests, golden render hashes (byte-identical output), rendered YAML checked against FAST's factory schemas, `lzctl check` on every golden render, and the vendored-upstream manifest check. It runs on Python 3.11 and 3.13, because output must not depend on the interpreter, and installs Terraform, trivy and checkov at pinned versions with `REQUIRE_TOOLS=1`, so a broken tool install fails the job instead of skipping the real-scanner tests. It has no path filter on pull requests: a path-filtered workflow that is skipped leaves a required check pending forever, and the suite takes about a minute.
 - **CI: Evals smoke:** the 8-scenario subset from DESIGN.md. **Ops: Evals full** runs all 25 scenarios x 4 clouds weekly, about $65 per run.
@@ -125,6 +125,8 @@ Required status checks are named `<workflow name> / <job name>`, so renaming a w
 | Terraform CLI | 1.16.5 |
 | trivy | v0.75.0 |
 | checkov | 3.3.26 |
+| actionlint | 1.7.12 (SHA-256 pinned in the workflow) |
+| zizmor | 1.30.1 |
 
 ## Repository settings
 

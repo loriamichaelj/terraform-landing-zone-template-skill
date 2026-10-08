@@ -1,12 +1,46 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/loriamichaelj/terraform-landing-zone-template-skill/schemas/lz-spec.gcp.schema.json",
-  "title": "Landing zone spec: GCP extensions",
-  "description": "Validates extensions.gcp. Applied by lzctl when target.cloud is gcp.",
+  "title": "Landing zone spec: GCP",
+  "description": "Applied by lzctl on top of the core schema when target.cloud is gcp. Tightens core fields to GCP formats and defines extensions.gcp. Every value that reaches a template is pattern-restricted here or in the core schema.",
   "type": "object",
-  "additionalProperties": false,
+  "required": ["extensions"],
   "properties": {
-    "hub_connectivity": { "enum": ["peering", "ncc", "nva", "vpn"] },
-    "audit_sink": { "enum": ["bigquery", "gcs", "both"] }
+    "target": {
+      "properties": {
+        "baseline_version": { "const": "v59.0.0" }
+      }
+    },
+    "organization": {
+      "properties": {
+        "id": { "type": "string", "pattern": "^[0-9]{6,15}$" },
+        "billing_ref": { "type": "string", "pattern": "^[0-9A-F]{6}-[0-9A-F]{6}-[0-9A-F]{6}$" }
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "required": ["gcp"],
+      "properties": {
+        "gcp": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["customer_id", "prefix"],
+          "properties": {
+            "customer_id": {
+              "description": "Cloud Identity customer ID (gcloud organizations list).",
+              "type": "string",
+              "pattern": "^[A-Za-z0-9]{6,12}$"
+            },
+            "prefix": {
+              "description": "Project name prefix; FAST requires it unique and under 9 characters.",
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,6}[a-z0-9]$"
+            },
+            "hub_connectivity": { "enum": ["peering", "ncc", "nva", "vpn"] },
+            "audit_sink": { "enum": ["bigquery", "gcs", "both"] }
+          }
+        }
+      }
+    }
   }
 }

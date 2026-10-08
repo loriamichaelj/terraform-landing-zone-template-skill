@@ -122,7 +122,7 @@ flowchart LR
 - [x] **Design:** architecture, spec schema, cost model, 18 ADRs
 - [x] **CI foundation:** OIDC per GitHub environment, Terraform state, Secret Manager + KMS, environment folders
 - [x] **Community:** license, contributing guide, issue forms, Discussions, protected `dev` branch
-- [ ] **P0, core + GCP:** spec schema, `lzctl`, validator image, eval harness, FAST datasets
+- [ ] **P0, core + GCP:** spec schema ✓, `lzctl` (validate, render ✓; check, explain next), validator image, eval harness, FAST datasets (`0-org-setup` ✓; networking and security next)
 - [ ] **P1, hosted agent:** ADK 2.0 workflow on Cloud Run, PR flow, first pilot
 - [ ] **P2, Azure, AWS, hosts:** AVM ALZ and Control Tower/AFT baselines, host compatibility matrix
 - [ ] **P3, OpenStack + hardening:** OpenStack modules, sandbox plans, security review

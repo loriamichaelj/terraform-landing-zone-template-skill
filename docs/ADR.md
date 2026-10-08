@@ -27,6 +27,7 @@ Statuses: **Proposed** (in the design, awaiting reviewer sign-off) · **Accepted
 | [017](#adr-017-environment-folders-and-the-environment-tag) | Environment folders and the environment tag | Accepted | 2026-10-07 |
 | [018](#adr-018-dev-accepts-changes-only-by-pull-request-except-the-owner) | `dev` accepts changes only by pull request, except the owner | Accepted | 2026-10-07 |
 | [019](#adr-019-every-taggable-resource-carries-both-the-name-and-environment-tags) | Every taggable resource carries both the name and environment tags | Accepted | 2026-10-07 |
+| [020](#adr-020-gcp-output-is-a-vendored-fast-dataset-plus-overlay-templates) | GCP output is a vendored FAST dataset plus overlay templates | Accepted | 2026-10-07 |
 
 ---
 
@@ -288,6 +289,28 @@ A ruleset was used rather than classic branch protection: rulesets are GitHub's 
 - The deploying identities need `roles/resourcemanager.tagUser` on the `environment` value as well as on the `name` value.
 - Which resource types accept tags depends on the service, so the exemption list is checked against Google's tag-supported-resources list when `infra/` is written.
 
+## ADR-020: GCP output is a vendored FAST dataset plus overlay templates
+
+**Status:** Accepted · 2026-10-07 · Refines ADR-007
+
+**Context.** A FAST `0-org-setup` dataset is a whole tree of about 40 YAML files, and only a handful carry organization-specific values. Rendering has to be deterministic (ADR-002), the output has to validate against FAST's own JSON schemas, and an upstream bump must be reviewable. Fetching the dataset from GitHub at render time would break determinism and the no-network validator rule (ADR-008). Writing every file as a template would bury the few lines we change under hundreds we don't.
+
+**Decision.**
+- `tools/vendor_fast.py` copies the pinned dataset (`classic` for v59.0.0), the stage's JSON schemas and the upstream license, unmodified, into `templates/gcp/fast-<tag>/upstream/`. It pins by commit SHA and writes `MANIFEST.json` with a SHA-256 for every file.
+- `lzctl render` refuses to run if any vendored file differs from the manifest. It copies the dataset and replaces only what the spec drives, using Jinja templates in `overlay/` (strict undefined variables, no model, no network): `defaults.yaml`, the log project's buckets, the `environment` tag values, and the per-environment and per-business-unit folders.
+- Every value that reaches a template is pattern-restricted by the schemas, and control characters are rejected, so a spec can't inject YAML.
+- Output is `datasets/landing-zone/**` plus `0-org-setup.auto.tfvars` and a `render-report.json` with per-file SHA-256, an `output_hash`, the baseline commit, and `not_rendered_yet`: the spec fields this slice doesn't turn into configuration. Nothing is dropped silently.
+- The `regulated` profile is refused until the `hardened` dataset is vendored. A classic dataset must not be labeled regulated.
+- The GCP spec schema constrains the whole spec, and `extensions.gcp` now requires `customer_id` (Cloud Identity) and `prefix` (project prefix, 2 to 8 characters), both of which `defaults.yaml` needs.
+
+**Consequences.**
+- Same spec plus same skill version gives byte-identical output; checked on Python 3.11, 3.12 and 3.13, and pinned by golden output hashes in `evals/gcp/golden/`.
+- Bumping the baseline means running the vendor tool for the new tag, diffing `upstream/` against the old one, updating the overlays that changed, and a full eval run.
+- The overlays duplicate the upstream files they derive from. The pristine copy is kept so a bump diff shows what upstream changed.
+- `classic` defines only `development` and `production`. `stage` is supported by adding a `staging` tag value and stage folders in the overlay, which is our extension rather than upstream's.
+- `classic` creates an organization tag key named `environment`. Applying a rendered landing zone to an organization that already has such a key (this repo's own org does, ADR-017) needs that key imported first. The agent never applies, so this only affects the team applying the PR.
+- Not rendered yet: `2-networking`, `2-security`, `1-vpcsc`, the hardened dataset, and the extra regions, CIDR plan and network groups. They are listed in the report for every render.
+
 ---
 
 ## Review log
@@ -357,3 +380,7 @@ A ruleset was used rather than classic branch protection: rulesets are GitHub's 
 | 18 | CICD.md listed every repo setting as unapplied after ADR-016 applied several | Split into applied and proposed tables |
 | 19 | ADR-013 waited for a key ring that ADR-014 had created | Updated the state-bucket CMEK note |
 | 20 | DESIGN.md had no resource hierarchy, and its repo layout omitted `docs/` and `.github/` | Added both |
+| 21 | The spec had no field for the Cloud Identity customer ID or the project prefix, both required by FAST `defaults.yaml` | Added to `extensions.gcp` (ADR-020) |
+| 22 | The `classic` dataset has only development and production, but the spec allows `stage` | Overlay adds a `staging` tag value and stage folders (ADR-020) |
+| 23 | DESIGN.md said the `minimal` dataset is TBD; v59.0.0 also ships `starter-gcd`, which we haven't evaluated | Noted; Starter stays `classic` trimmed to one environment |
+| 24 | A pattern ending in `$` also matches before a trailing newline in Python, unlike ECMA-262 | Reject control characters in every spec string before rendering |

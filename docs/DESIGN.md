@@ -191,6 +191,8 @@ Core fields are cloud-agnostic. Settings with no cross-cloud equivalent live und
   "iam": { "groups": { "org_admins": "email", "network_admins": "email", "security_admins": "email" } },
   "extensions": {
     "gcp": {
+      "customer_id": "string",
+      "prefix": "string",
       "hub_connectivity": "peering | ncc | nva | vpn",
       "audit_sink": "bigquery | gcs | both"
     }
@@ -218,7 +220,7 @@ The user picks a target cloud and a profile; the skill maps one cloud-agnostic s
 
 | Profile | Use case | What it adds | GCP (FAST) mapping |
 | --- | --- | --- | --- |
-| Starter | Sandbox, proof of concept | Hierarchy, one environment, single network, central logging, budgets | `classic` dataset, trimmed to one environment (upstream `minimal` dataset is TBD) |
+| Starter | Sandbox, proof of concept | Hierarchy, one environment, single network, central logging, budgets | `classic` dataset, trimmed to one environment (upstream `minimal` is still TBD in v59.0.0) |
 | Standard (default) | Most enterprise workloads | dev/stage/prod, hub-and-spoke network, baseline guardrails, IAM groups, cost labels, audit log retention 1 year | `classic` dataset |
 | Regulated | SOC 2, PCI-DSS, HIPAA scope | Standard plus customer-managed keys, private-only service access, service perimeter or preventive SCPs, stricter policy pack, break-glass accounts, longer log retention | `hardened` dataset plus `1-vpcsc` and `2-security`; its detective controls need SCC Premium or Enterprise |
 
@@ -246,7 +248,7 @@ One skill directory runs unchanged in Codex, Gemini CLI and Grok Build, because 
 | Command | Does |
 | --- | --- |
 | `lzctl spec validate` | Checks the spec against the per-cloud JSON schema |
-| `lzctl render --cloud <c>` | Renders templates to YAML datasets and tfvars |
+| `lzctl render <spec> --out <dir>` | Renders a spec to YAML datasets and tfvars, plus a report with file hashes and the fields not rendered yet |
 | `lzctl check` | Runs fmt, validate, tflint, trivy, conftest and upstream schema checks; emits JSON findings |
 | `lzctl explain <finding>` | Maps a finding back to the spec field that caused it |
 | `lzctl doctor` | Checks runtime dependencies and, for OpenStack, discovers available services |
@@ -368,7 +370,7 @@ docs/                 # design, ADRs, CI/CD strategy, runbooks
 .github/              # workflows, issue forms, PR template, CODEOWNERS, Dependabot
 ```
 
-Built so far: `docs/`, `.github/` and the community files (LICENSE, CONTRIBUTING, SECURITY, SUPPORT, CODE_OF_CONDUCT), plus the first P0 slice: the skill package with the core and GCP spec schemas, `lzctl spec validate` and `lzctl doctor`, the `.gemini/skills` symlink, golden GCP specs in `evals/` and tests in `tests/`. `lzctl render`, `check` and `explain`, the templates, policies, `agent/`, `validator/` and `infra/` come next, with P0 and P1.
+Built so far: `docs/`, `.github/` and the community files (LICENSE, CONTRIBUTING, SECURITY, SUPPORT, CODE_OF_CONDUCT), plus the first P0 slices: the skill package with the core and GCP spec schemas, `lzctl spec validate`, `render` and `doctor`, the vendored FAST v59.0.0 `classic` dataset with overlay templates (ADR-020), the `.gemini/skills` symlink, golden GCP specs and render hashes in `evals/`, and tests in `tests/`. `render` covers the `0-org-setup` dataset only. `lzctl check` and `explain`, the networking and security datasets, policies, `agent/`, `validator/` and `infra/` come next, with P0 and P1.
 
 **Pipeline** (full strategy, environments and naming in [CICD.md](CICD.md))
 

@@ -2,16 +2,18 @@
 """lzctl: deterministic landing zone tooling shared by every agent host.
 
 Commands:
-  spec validate <spec.json>   Check a spec against the core and per-cloud schemas.
-  doctor                      Check runtime dependencies.
+  spec validate <spec.json>          Check a spec against the core and per-cloud schemas.
+  render <spec.json> --out <dir>     Render a valid spec into FAST configuration data (GCP).
+  doctor                             Check runtime dependencies.
 
-Exit codes: 0 clean, 1 findings, 2 usage or environment error.
-Requires Python 3.11+ and the jsonschema package.
+Exit codes: 0 clean, 1 findings or render refused, 2 usage or environment error.
+Requires Python 3.11+, jsonschema and jinja2.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import ipaddress
 import json
 import shutil
@@ -20,8 +22,36 @@ from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
 SCHEMA_DIR = SKILL_DIR / "schemas"
+TEMPLATE_DIR = SKILL_DIR / "templates"
 
 EXIT_OK, EXIT_FINDINGS, EXIT_ERROR = 0, 1, 2
+
+# One pinned baseline per cloud per skill version. Bumping requires re-vendoring
+# (tools/vendor_fast.py), updating the overlays and a full eval run.
+BASELINES = {
+    "gcp": {"tag": "v59.0.0", "dir": "gcp/fast-v59.0.0", "dataset": "classic", "output_dataset": "landing-zone"},
+}
+
+# Canonical order, so output never depends on the order in the spec.
+ENVIRONMENTS = {
+    "dev": {"tag_value": "development", "folder_name": "Development", "description": "Development."},
+    "stage": {"tag_value": "staging", "folder_name": "Staging", "description": "Staging."},
+    "prod": {"tag_value": "production", "folder_name": "Production", "description": "Production."},
+}
+
+# Spec fields the GCP renderer does not turn into configuration yet, with the stage that will.
+DEFERRED_GCP = {
+    "network.topology": "2-networking dataset",
+    "network.cidr_supernet": "2-networking dataset",
+    "network.private_service_access": "2-networking dataset",
+    "iam.groups.network_admins": "2-networking dataset",
+    "iam.groups.security_admins": "2-security dataset",
+    "security.service_perimeter": "1-vpcsc and the hardened dataset (regulated profile)",
+    "security.customer_managed_keys": "2-security and the hardened dataset (regulated profile)",
+    "security.compliance": "policy pack",
+    "extensions.gcp.hub_connectivity": "2-networking dataset",
+    "extensions.gcp.audit_sink": "additional log sinks",
+}
 
 TOOLS = {
     "terraform": "fmt and validate (OpenTofu also works)",
@@ -29,6 +59,10 @@ TOOLS = {
     "trivy": "security scan",
     "conftest": "policy checks",
 }
+
+
+class RenderError(Exception):
+    """The spec cannot be rendered; the message says why."""
 
 
 def _fail(message: str) -> int:
@@ -49,10 +83,10 @@ def _finding(rule: str, path: str, message: str) -> dict:
     return {"rule": rule, "path": path, "message": message}
 
 
-def _schema_findings(validator_cls, schema: dict, instance: object, prefix: tuple = ()) -> list[dict]:
+def _schema_findings(validator_cls, schema: dict, instance: object) -> list[dict]:
     findings = []
     for error in validator_cls(schema).iter_errors(instance):
-        path = _dotted(prefix + tuple(error.absolute_path))
+        path = _dotted(error.absolute_path)
         if error.validator == "not" and path.endswith("extensions"):
             message = "extensions may only contain the block for target.cloud"
         elif error.validator == "required":
@@ -63,9 +97,24 @@ def _schema_findings(validator_cls, schema: dict, instance: object, prefix: tupl
     return findings
 
 
+def _strings(node: object, path: tuple = ()):
+    if isinstance(node, str):
+        yield path, node
+    elif isinstance(node, dict):
+        for key, value in node.items():
+            yield from _strings(value, path + (key,))
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            yield from _strings(value, path + (index,))
+
+
 def _semantic_findings(spec: dict) -> list[dict]:
     """Checks JSON Schema can't express."""
     findings = []
+    # Python's `$` also matches before a trailing newline, unlike ECMA-262; values reach templates.
+    for path, value in _strings(spec):
+        if any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
+            findings.append(_finding("semantic.control_character", _dotted(path), "control characters are not allowed"))
     cidr = spec.get("network", {}).get("cidr_supernet")
     if isinstance(cidr, str):
         try:
@@ -93,20 +142,172 @@ def validate_spec(spec: object) -> list[dict]:
 
     findings += _semantic_findings(spec)
 
-    cloud = spec.get("target", {}).get("cloud") if isinstance(spec.get("target"), dict) else None
-    extension = spec.get("extensions", {}).get(cloud) if isinstance(spec.get("extensions"), dict) else None
-    if cloud and extension is not None:
+    target = spec.get("target")
+    cloud = target.get("cloud") if isinstance(target, dict) else None
+    if isinstance(cloud, str):
         schema_path = SCHEMA_DIR / f"lz-spec.{cloud}.schema.json"
         if schema_path.exists():
-            findings += _schema_findings(
-                Draft202012Validator, _load_json(schema_path), extension, prefix=("extensions", cloud)
-            )
+            findings += _schema_findings(Draft202012Validator, _load_json(schema_path), spec)
         else:
-            findings.append(
-                _finding("semantic.cloud_unsupported", f"extensions.{cloud}", f"no extension schema for {cloud} yet")
-            )
+            findings.append(_finding("semantic.cloud_unsupported", "target.cloud", f"{cloud} is not supported yet"))
 
     return sorted(findings, key=lambda f: (f["path"], f["rule"], f["message"]))
+
+
+# --- render -----------------------------------------------------------------
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _present(spec: dict, dotted: str) -> bool:
+    node: object = spec
+    for part in dotted.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return False
+        node = node[part]
+    return True
+
+
+def _load_baseline(cloud: str) -> tuple[dict, Path]:
+    baseline = BASELINES.get(cloud)
+    if baseline is None:
+        raise RenderError(f"{cloud} has no baseline yet")
+    root = TEMPLATE_DIR / baseline["dir"]
+    manifest = _load_json(root / "MANIFEST.json")
+    for relative, expected in manifest["files"].items():
+        path = root / "upstream" / relative
+        if not path.is_file() or _sha256(path.read_bytes()) != expected:
+            raise RenderError(f"vendored upstream file {relative} does not match MANIFEST.json; re-run tools/vendor_fast.py")
+    return manifest, root
+
+
+def render_spec(spec: dict) -> tuple[dict[str, bytes], dict]:
+    """Return ({relative path: bytes}, report). Pure: same spec and skill version, same bytes."""
+    try:
+        import jinja2
+    except ImportError as exc:
+        raise RuntimeError("jinja2 is not installed; run `lzctl doctor`") from exc
+
+    findings = validate_spec(spec)
+    if findings:
+        raise RenderError(f"spec is invalid ({len(findings)} findings); run `lzctl spec validate`")
+
+    cloud = spec["target"]["cloud"]
+    if spec["target"]["profile"] == "regulated":
+        raise RenderError("the regulated profile needs the FAST hardened dataset, which is not supported yet")
+
+    baseline = BASELINES[cloud]
+    manifest, root = _load_baseline(cloud)
+    if spec["target"]["baseline_version"] != manifest["tag"]:
+        raise RenderError(f"baseline_version {spec['target']['baseline_version']} does not match the vendored {manifest['tag']}")
+
+    env = jinja2.Environment(
+        loader=jinja2.FileSystemLoader(str(root / "overlay")),
+        undefined=jinja2.StrictUndefined,
+        trim_blocks=True,
+        lstrip_blocks=True,
+        keep_trailing_newline=True,
+        autoescape=False,
+    )
+
+    def render(template: str, **values) -> bytes:
+        return env.get_template(template).render(**values).encode("utf-8")
+
+    dataset_prefix = f"datasets/{baseline['output_dataset']}/"
+    upstream_dataset = root / "upstream" / "datasets" / baseline["dataset"]
+    files: dict[str, bytes] = {}
+    for path in sorted(upstream_dataset.rglob("*")):
+        if path.is_file():
+            files[path.relative_to(upstream_dataset).as_posix()] = path.read_bytes()
+
+    selected = [name for name in ENVIRONMENTS if name in spec["hierarchy"]["environments"]]
+    envs = [ENVIRONMENTS[name] for name in selected]
+
+    # Environment folders: drop the dataset's own, then render the selected ones.
+    for path in [p for p in files if p.startswith(("folders/networking/", "folders/security/")) and p.count("/") == 3]:
+        del files[path]
+    for name in selected:
+        for kind in ("networking", "security"):
+            files[f"folders/{kind}/{name}/.config.yaml"] = render(f"folder-{kind}-env.yaml.j2", env=ENVIRONMENTS[name])
+
+    for unit in sorted(spec["hierarchy"].get("business_units", [])):
+        files[f"folders/teams/{unit}/.config.yaml"] = render("folder-team.yaml.j2", name=unit)
+
+    logging = spec["logging"]
+    ext = spec["extensions"]["gcp"]
+    files["organization/tags/environment.yaml"] = render("tags-environment.yaml.j2", environments=envs)
+    files["projects/core/log-0.yaml"] = render(
+        "log-0.yaml.j2",
+        retention_days=logging["retention_days"],
+        log_analytics=logging["audit_destination"] in ("analytics", "both"),
+    )
+    files["defaults.yaml"] = render(
+        "defaults.yaml.j2",
+        billing_account=spec["organization"]["billing_ref"],
+        domain=spec["organization"]["domain"],
+        organization_id=int(spec["organization"]["id"]),
+        customer_id=ext["customer_id"],
+        prefix=ext["prefix"],
+        org_admins=spec["iam"]["groups"]["org_admins"],
+        primary_region=spec["network"]["regions"][0],
+    )
+
+    output = {dataset_prefix + path: data for path, data in files.items()}
+    output["0-org-setup.auto.tfvars"] = render(
+        "factories.tfvars.j2", baseline_tag=manifest["tag"], dataset_name=baseline["output_dataset"]
+    )
+
+    digests = {path: _sha256(data) for path, data in sorted(output.items())}
+    output_hash = _sha256("".join(f"{path}\0{digest}\n" for path, digest in digests.items()).encode("utf-8"))
+    deferred = {field: stage for field, stage in DEFERRED_GCP.items() if _present(spec, field)}
+    extra_regions = spec["network"]["regions"][1:]
+    if extra_regions:
+        deferred["network.regions[1:]"] = "2-networking dataset"
+    report = {
+        "baseline": {"cloud": cloud, "tag": manifest["tag"], "commit": manifest["commit"], "dataset": baseline["dataset"]},
+        "output_hash": output_hash,
+        "files": digests,
+        "not_rendered_yet": dict(sorted(deferred.items())),
+    }
+    return output, report
+
+
+def cmd_render(args: argparse.Namespace) -> int:
+    path = Path(args.spec)
+    try:
+        spec = _load_json(path)
+    except FileNotFoundError:
+        return _fail(f"{path} not found")
+    except json.JSONDecodeError as exc:
+        return _fail(f"{path} is not valid JSON: {exc}")
+    if not isinstance(spec, dict):
+        return _fail(f"{path} must contain a JSON object")
+
+    out = Path(args.out)
+    if out.exists() and any(out.iterdir()):
+        return _fail(f"{out} exists and is not empty")
+
+    try:
+        files, report = render_spec(spec)
+    except RenderError as exc:
+        print(json.dumps({"rendered": False, "reason": str(exc)}, indent=2))
+        return EXIT_FINDINGS
+    except RuntimeError as exc:
+        return _fail(str(exc))
+
+    for relative, data in files.items():
+        target = out / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+    (out / "render-report.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(json.dumps({"rendered": True, "out": str(out), "files": len(files), "output_hash": report["output_hash"],
+                      "not_rendered_yet": report["not_rendered_yet"]}, indent=2, sort_keys=True))
+    return EXIT_OK
+
+
+# --- other commands ---------------------------------------------------------
 
 
 def cmd_spec_validate(args: argparse.Namespace) -> int:
@@ -137,12 +338,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     checks = []
     py_ok = sys.version_info >= (3, 11)
     checks.append({"name": "python>=3.11", "ok": py_ok, "required": True, "detail": sys.version.split()[0]})
-    try:
-        import jsonschema
-
-        checks.append({"name": "jsonschema", "ok": True, "required": True, "detail": jsonschema.__version__})
-    except ImportError:
-        checks.append({"name": "jsonschema", "ok": False, "required": True, "detail": "pip install jsonschema"})
+    for module, pip_name in (("jsonschema", "jsonschema"), ("jinja2", "jinja2")):
+        try:
+            imported = __import__(module)
+            checks.append({"name": module, "ok": True, "required": True, "detail": getattr(imported, "__version__", "installed")})
+        except ImportError:
+            checks.append({"name": module, "ok": False, "required": True, "detail": f"pip install {pip_name}"})
     for tool, purpose in TOOLS.items():
         found = shutil.which(tool)
         checks.append({"name": tool, "ok": bool(found), "required": False, "detail": found or f"missing ({purpose})"})
@@ -166,6 +367,11 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("spec", help="path to the spec JSON file")
     validate.add_argument("--format", choices=["json", "text"], default="json")
     validate.set_defaults(func=cmd_spec_validate)
+
+    render = sub.add_parser("render", help="render a spec into configuration data")
+    render.add_argument("spec", help="path to the spec JSON file")
+    render.add_argument("--out", required=True, help="output directory (must be empty or absent)")
+    render.set_defaults(func=cmd_render)
 
     doctor = sub.add_parser("doctor", help="check runtime dependencies")
     doctor.add_argument("--format", choices=["json", "text"], default="json")

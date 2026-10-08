@@ -10,8 +10,8 @@ The schema in `schemas/lz-spec.core.schema.json` is the source of truth. This fi
 | `target.cloud` | yes | `gcp` today; `azure`, `aws`, `openstack` later |
 | `target.profile` | yes | `starter`, `standard`, `regulated` |
 | `target.baseline_version` | yes | Pinned upstream release, for GCP `v59.0.0` |
-| `organization.id` | yes | Cloud organization ID, tenant or account root |
-| `organization.billing_ref` | yes | Billing account or equivalent |
+| `organization.id` | yes | Cloud organization ID, tenant or account root. GCP: 6 to 15 digits |
+| `organization.billing_ref` | yes | Billing account or equivalent. GCP: `XXXXXX-XXXXXX-XXXXXX` |
 | `organization.domain` | yes | Primary DNS domain, such as `example.com` |
 | `hierarchy.environments` | yes | Subset of `dev`, `stage`, `prod`, no duplicates |
 | `hierarchy.business_units` | no | Lowercase names, 3 to 30 characters, hyphens allowed |
@@ -25,7 +25,7 @@ The schema in `schemas/lz-spec.core.schema.json` is the source of truth. This fi
 | `logging.audit_destination` | yes | `analytics`, `archive` or `both` |
 | `logging.retention_days` | yes | 30 to 3650 |
 | `iam.groups.org_admins`, `network_admins`, `security_admins` | yes | Group email addresses |
-| `extensions.<cloud>` | no | Only the block for `target.cloud` |
+| `extensions.<cloud>` | GCP: yes | Only the block for `target.cloud`. GCP needs `customer_id` and `prefix` (see `gcp.md`) |
 | `decisions[]` | no | `field`, `value`, `rationale`, `source` |
 
 Unknown fields are rejected. Do not invent inputs.
@@ -40,6 +40,6 @@ Unknown fields are rejected. Do not invent inputs.
 
 ## Reading findings
 
-`lzctl spec validate` prints JSON: `{"valid": bool, "findings": [{"rule", "path", "message"}]}`. `path` is the dotted spec field to change, for example `logging.retention_days`. Rule prefixes: `schema.*` (shape and limits) and `semantic.*` (checks a schema can't express, such as CIDR sanity).
+`lzctl spec validate` prints JSON: `{"valid": bool, "findings": [{"rule", "path", "message"}]}`. `path` is the dotted spec field to change, for example `logging.retention_days`. Rule prefixes: `schema.*` (shape and limits) and `semantic.*` (checks a schema can't express, such as CIDR sanity, control characters and unsupported clouds).
 
 Exit codes: 0 valid, 1 findings, 2 usage or file error.

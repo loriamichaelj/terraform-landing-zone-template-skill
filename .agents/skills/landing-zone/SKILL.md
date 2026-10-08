@@ -21,13 +21,14 @@ You collect requirements and produce a **landing zone spec** (JSON). You choose 
 2. **Interview.** Fill the fields in `references/common.md`. Ask a follow-up for each missing mandatory field instead of guessing.
 3. **Write the spec** to a file, for example `landing-zone.spec.json`.
 4. **Validate:** run `scripts/lzctl spec validate landing-zone.spec.json`. Each finding names the spec field to change (`path`). Fix the spec and re-run. After 3 failed rounds, stop and show the findings to the user.
-5. **Confirm** the spec and the decision log with the user.
+5. **Render:** run `scripts/lzctl render landing-zone.spec.json --out <empty dir>`. Read `not_rendered_yet` in the output and tell the user which parts of their requirements are not in the configuration yet.
+6. **Confirm** the spec, the render report and the decision log with the user.
 
-Run `scripts/lzctl doctor` first if `lzctl` fails to start. It needs Python 3.11+ and the `jsonschema` package.
+Run `scripts/lzctl doctor` first if `lzctl` fails to start. It needs Python 3.11+ and the `jsonschema` and `jinja2` packages.
 
 ## Status
 
-Implemented: `lzctl spec validate`, `lzctl doctor`. Not yet: `render`, `check`, `explain`. Until `render` exists, the output of this skill is a validated spec, not a pull request.
+Implemented: `lzctl spec validate`, `render` (GCP `0-org-setup` dataset, `starter` and `standard` profiles), `doctor`. Not yet: `check`, `explain`, networking and security datasets, the `regulated` profile (render refuses it). The output today is a validated spec and a rendered dataset, not a pull request.
 
 ## References
 

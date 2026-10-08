@@ -35,3 +35,5 @@ terraform.rc
 __pycache__/
 .pytest_cache/
 .venv/
+
+!evals/**/*.tfvars

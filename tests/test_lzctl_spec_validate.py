@@ -114,7 +114,7 @@ def test_service_perimeter_is_gcp_only():
         s.pop("extensions")
         s["security"]["service_perimeter"] = True
 
-    assert paths(lzctl.validate_spec(mutated("regulated", change))) == {"security.service_perimeter"}
+    assert "security.service_perimeter" in paths(lzctl.validate_spec(mutated("regulated", change)))
 
 
 def test_extensions_must_match_target_cloud():
@@ -127,14 +127,14 @@ def test_gcp_extension_values_checked():
     assert paths(lzctl.validate_spec(spec)) == {"extensions.gcp.hub_connectivity"}
 
 
-def test_unsupported_cloud_extension_is_flagged():
+def test_unsupported_cloud_is_flagged():
     def change(s):
         s["target"]["cloud"] = "azure"
         s["security"]["service_perimeter"] = False
         s["extensions"] = {"azure": {"x": 1}}
 
     findings = lzctl.validate_spec(mutated("standard", change))
-    assert [f["rule"] for f in findings] == ["semantic.cloud_unsupported"]
+    assert [(f["rule"], f["path"]) for f in findings] == [("semantic.cloud_unsupported", "target.cloud")]
 
 
 def test_decision_requires_rationale():
@@ -171,5 +171,49 @@ def test_doctor_reports_required_dependencies():
     result = run_cli("doctor")
     report = json.loads(result.stdout)
     names = {c["name"] for c in report["checks"]}
-    assert {"python>=3.11", "jsonschema", "terraform", "tflint", "trivy", "conftest"} <= names
+    assert {"python>=3.11", "jsonschema", "jinja2", "terraform", "tflint", "trivy", "conftest"} <= names
     assert report["ok"] is True
+
+
+def test_gcp_requires_extensions_block():
+    spec = mutated("standard", lambda s: s.pop("extensions"))
+    assert paths(lzctl.validate_spec(spec)) == {"(root)"}
+
+
+@pytest.mark.parametrize("field", ["customer_id", "prefix"])
+def test_gcp_requires_customer_id_and_prefix(field):
+    spec = mutated("standard", lambda s: s["extensions"]["gcp"].pop(field))
+    assert paths(lzctl.validate_spec(spec)) == {"extensions.gcp"}
+
+
+@pytest.mark.parametrize("prefix", ["toolongpfx", "Acme", "a", "acme-", "-acme"])
+def test_gcp_prefix_must_be_short_lowercase(prefix):
+    spec = mutated("standard", lambda s: s["extensions"]["gcp"].update(prefix=prefix))
+    assert paths(lzctl.validate_spec(spec)) == {"extensions.gcp.prefix"}
+
+
+def test_gcp_organization_id_must_be_numeric():
+    spec = mutated("standard", lambda s: s["organization"].update(id="organizations/123"))
+    assert paths(lzctl.validate_spec(spec)) == {"organization.id"}
+
+
+def test_gcp_billing_ref_format():
+    spec = mutated("standard", lambda s: s["organization"].update(billing_ref="not-a-billing-id"))
+    assert paths(lzctl.validate_spec(spec)) == {"organization.billing_ref"}
+
+
+def test_baseline_version_must_match_the_pinned_baseline():
+    spec = mutated("standard", lambda s: s["target"].update(baseline_version="v58.0.0"))
+    assert paths(lzctl.validate_spec(spec)) == {"target.baseline_version"}
+
+
+@pytest.mark.parametrize("value", ["example.com\n", "gcp-admins@example.com\r", "a\x00b"])
+def test_control_characters_are_rejected_everywhere(value):
+    spec = mutated("standard", lambda s: s["organization"].update(domain=value))
+    assert any(f["rule"] == "semantic.control_character" for f in lzctl.validate_spec(spec))
+
+
+@pytest.mark.parametrize("email", ["{x}@example.com", "a b@example.com", "x@example.com: y", "a:b@example.com"])
+def test_yaml_significant_characters_in_emails_are_rejected(email):
+    spec = mutated("standard", lambda s: s["iam"]["groups"].update(org_admins=email))
+    assert "iam.groups.org_admins" in paths(lzctl.validate_spec(spec))

@@ -99,7 +99,7 @@ flowchart LR
   agent -->|run_validation| job
 
   subgraph iso["Cloud Run Job: lz-validator (lz-validator-sa, no egress)"]
-    job["fmt · validate · tflint · trivy · conftest · schema checks<br/>providers and modules baked into image"]
+    job["fmt · validate · tflint · trivy · checkov · conftest · schema checks<br/>providers and modules baked into image"]
   end
 
   job --> gcs
@@ -253,7 +253,7 @@ One skill directory runs unchanged in Codex, Gemini CLI and Grok Build, because 
 | --- | --- |
 | `lzctl spec validate` | Checks the spec against the per-cloud JSON schema |
 | `lzctl render <spec> --out <dir>` | Renders a spec to YAML datasets and tfvars, plus a report with file hashes and the fields not rendered yet |
-| `lzctl check <dir>` | Verifies a rendered directory and emits JSON findings. Today: file integrity against the render report, upstream schema checks and `terraform fmt`. Validate, tflint, trivy and conftest are reported `not_applicable` until HCL and a policy pack are rendered (ADR-021) |
+| `lzctl check <dir>` | Verifies a rendered directory and emits JSON findings. Today: file integrity against the render report, upstream schema checks and `terraform fmt`. Trivy and Checkov scan rendered `.tf` files and are `not_applicable` until some exist (ADR-022). Validate, tflint and conftest are `not_applicable` until HCL and a policy pack are rendered (ADR-021) |
 | `lzctl explain <finding>` | Maps a finding back to the spec field that caused it |
 | `lzctl doctor` | Checks runtime dependencies and, for OpenStack, discovers available services |
 
@@ -273,7 +273,7 @@ The Cloud Run ADK agent becomes one more host: it calls the same `lzctl`, so hos
 
 - No host-specific tool names in `SKILL.md`; refer to "run `lzctl check`", not a vendor tool.
 - Keep `SKILL.md` short and load `references/<cloud>.md` on demand, so small-context models still fit.
-- Runtime dependencies: Python 3.11, Terraform or OpenTofu, tflint, trivy, conftest. `lzctl doctor` checks them.
+- Runtime dependencies: Python 3.11, Terraform or OpenTofu, tflint, trivy, checkov, conftest. `lzctl doctor` checks them.
 - Ship one canonical copy in `.agents/skills/landing-zone/` and symlink `.gemini/skills/landing-zone` to it, so hosts never read divergent copies.
 - Evals run per host x model, because spec quality differs by model even when rendering is identical.
 - Optional, development time only: the HashiCorp Terraform MCP server (GA June 2026) gives hosts version-accurate provider and module docs. It is never in the render path.
@@ -310,7 +310,7 @@ The agent's own infrastructure is defined in Terraform in the same repo and depl
 | Component | GCP service | Notes |
 | --- | --- | --- |
 | Agent service | Cloud Run service | ADK 2.0 app container; IAP enabled on the service; min instances 1 to avoid cold starts mid-conversation |
-| Validator | Cloud Run Job | Image with terraform, tflint, trivy, conftest and a provider/module filesystem mirror; Direct VPC egress into a subnet with deny-all egress firewall; one execution per validation |
+| Validator | Cloud Run Job | Image with terraform, tflint, trivy, checkov, conftest and a provider/module filesystem mirror; Direct VPC egress into a subnet with deny-all egress firewall; one execution per validation |
 | Images | Artifact Registry | Vulnerability scanning on; images signed and enforced with Binary Authorization |
 | Session state | Firestore (native mode) | ADK session store |
 | Artifacts | Cloud Storage | Rendered output and findings per run; CMEK; lifecycle delete after retention period |

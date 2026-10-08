@@ -4,7 +4,7 @@
 Commands:
   spec validate <spec.json>          Check a spec against the core and per-cloud schemas.
   render <spec.json> --out <dir>     Render a valid spec into FAST configuration data (GCP).
-  check <dir>                        Verify a rendered directory: integrity, upstream schemas, formatting.
+  check <dir>                        Verify a rendered directory: integrity, upstream schemas, formatting, scans.
   doctor                             Check runtime dependencies.
 
 Exit codes: 0 clean, 1 findings or render refused, 2 usage or environment error.
@@ -65,14 +65,18 @@ SCHEMA_DECLARATION = re.compile(rb"yaml-language-server: \$schema=\S*?([\w-]+\.s
 NOT_APPLICABLE = {
     "terraform-validate": "needs the FAST stage module, which is not vendored; the output is data files only",
     "tflint": "no HCL is rendered yet",
-    "trivy": "no HCL is rendered yet",
     "conftest": "no policy pack yet",
 }
+
+# Misconfiguration scanners. They run on rendered .tf files and are not_applicable until some exist (ADR-022).
+SCAN_TIMEOUT = 120
+SUPPRESSION = re.compile(rb"checkov:skip|trivy:ignore|tfsec:ignore", re.IGNORECASE)
 
 TOOLS = {
     "terraform": "fmt and validate (OpenTofu also works)",
     "tflint": "lint",
-    "trivy": "security scan",
+    "trivy": "misconfiguration scan",
+    "checkov": "misconfiguration scan",
     "conftest": "policy checks",
 }
 
@@ -458,6 +462,90 @@ def _terraform_fmt(directory: Path) -> tuple[dict, list[dict]]:
     return _check_result("terraform-fmt", "failed", detail), [_finding("check.terraform.fmt", ".", detail)]
 
 
+def _run_scanner(argv: list[str], directory: Path, extra_env: dict[str, str]) -> subprocess.CompletedProcess | str:
+    """Run a scanner in the rendered directory. Returns the process, or a message if it could not run."""
+    try:
+        return subprocess.run(argv, cwd=directory, capture_output=True, text=True, timeout=SCAN_TIMEOUT,
+                              env={**os.environ, **extra_env}, check=False)
+    except subprocess.TimeoutExpired:
+        return f"timed out after {SCAN_TIMEOUT}s"
+    except OSError as exc:
+        return str(exc)
+
+
+def _scanner_error(name: str, detail: str) -> tuple[dict, list[dict]]:
+    detail = detail[:160]
+    return _check_result(name, "failed", detail), [_finding(f"check.{name}.error", ".", detail)]
+
+
+def _scan_trivy(exe: str, directory: Path) -> tuple[dict, list[dict]]:
+    # `trivy config` exits 0 even with failures, so read the report, not the exit code.
+    proc = _run_scanner([exe, "config", "--format", "json", "--quiet", "--skip-check-update", "."], directory, {})
+    if isinstance(proc, str):
+        return _scanner_error("trivy", proc)
+    if proc.returncode != 0:
+        return _scanner_error("trivy", (proc.stderr.strip().splitlines() or [f"exit {proc.returncode}"])[0])
+    try:
+        results = json.loads(proc.stdout).get("Results") or []
+    except (json.JSONDecodeError, AttributeError):
+        return _scanner_error("trivy", "output was not a trivy JSON report")
+    findings = []
+    for result in results:
+        for item in result.get("Misconfigurations") or []:
+            if item.get("Status") == "FAIL":
+                resource = (item.get("CauseMetadata") or {}).get("Resource")
+                where = f" ({resource})" if resource else ""
+                findings.append(_finding(f"check.trivy.{item.get('ID')}", str(result.get("Target")),
+                                         f"{item.get('Title')}{where} [{item.get('Severity')}]"))
+    status = "failed" if findings else "passed"
+    return _check_result("trivy", status, f"{len(findings)} finding(s)" if findings else "no misconfigurations"), findings
+
+
+def _scan_checkov(exe: str, directory: Path) -> tuple[dict, list[dict]]:
+    # Checkov exits 1 when checks fail; any other non-zero code is an error. --skip-download keeps it offline.
+    argv = [exe, "-d", ".", "--framework", "terraform", "--output", "json", "--quiet", "--compact", "--skip-download"]
+    proc = _run_scanner(argv, directory, {"BC_SKIP_MAPPING": "TRUE"})
+    if isinstance(proc, str):
+        return _scanner_error("checkov", proc)
+    if proc.returncode not in (0, 1):
+        return _scanner_error("checkov", (proc.stderr.strip().splitlines() or [f"exit {proc.returncode}"])[0])
+    try:
+        reports = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return _scanner_error("checkov", "output was not a checkov JSON report")
+    findings = []
+    for report in reports if isinstance(reports, list) else [reports]:
+        if not isinstance(report, dict):
+            return _scanner_error("checkov", "output was not a checkov JSON report")
+        if (report.get("summary") or {}).get("parsing_errors"):
+            findings.append(_finding("check.checkov.parse", ".", "checkov could not parse some files"))
+        for item in (report.get("results") or {}).get("failed_checks") or []:
+            findings.append(_finding(f"check.checkov.{item.get('check_id')}", str(item.get("file_path", ".")).lstrip("/"),
+                                     f"{item.get('check_name')} ({item.get('resource')})"))
+    status = "failed" if findings else "passed"
+    return _check_result("checkov", status, f"{len(findings)} finding(s)" if findings else "no misconfigurations"), findings
+
+
+def _hcl_scans(directory: Path, on_disk: dict[str, Path]) -> tuple[list[dict], list[dict]]:
+    scanners = (("trivy", _scan_trivy), ("checkov", _scan_checkov))
+    hcl = sorted(relative for relative in on_disk if relative.endswith(".tf"))
+    if not hcl:
+        return [_check_result(name, "not_applicable", "no .tf files in the rendered output") for name, _ in scanners], []
+    # Inline suppressions would let rendered HCL opt out of the scans.
+    findings = [_finding("check.hcl.suppression", relative, "inline scanner suppressions are not allowed in rendered output")
+                for relative in hcl if SUPPRESSION.search(on_disk[relative].read_bytes())]
+    checks = []
+    for name, scan in scanners:
+        exe = shutil.which(name)
+        if exe is None:
+            checks.append(_check_result(name, "skipped", f"{name} is not installed"))
+            continue
+        result, scan_findings = scan(exe, directory)
+        checks.append(result)
+        findings += scan_findings
+    return checks, findings
+
+
 def check_output(directory: Path) -> tuple[list[dict], list[dict]]:
     """Verify a rendered directory. Returns (checks, findings); findings is empty when clean."""
     report = _load_report(directory)
@@ -473,9 +561,11 @@ def check_output(directory: Path) -> tuple[list[dict], list[dict]]:
 
     fmt_check, fmt = _terraform_fmt(directory)
     checks.append(fmt_check)
+    scans, scan_findings = _hcl_scans(directory, on_disk)
+    checks += scans
     checks += [_check_result(name, "not_applicable", reason) for name, reason in NOT_APPLICABLE.items()]
 
-    findings = sorted(integrity + schema + fmt, key=lambda f: (f["path"], f["rule"], f["message"]))
+    findings = sorted(integrity + schema + fmt + scan_findings, key=lambda f: (f["path"], f["rule"], f["message"]))
     return checks, findings
 
 

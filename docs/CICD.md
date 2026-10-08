@@ -11,7 +11,7 @@ This covers how code in this repo is tested, released and deployed: branches, en
 3. **Plan on pull request, apply on merge.** Nothing changes in GCP from an unmerged branch.
 4. **Build once, promote the same artifact.** Images and skill packages are built once, signed, and promoted by digest, never rebuilt per environment.
 5. **Least privilege by default.** Workflows start with `permissions: {}`, and each job asks only for what it needs.
-6. **Pinned and reproducible.** Actions are pinned to a commit SHA, and tool versions (Terraform, tflint, trivy, conftest) are pinned in the workflow.
+6. **Pinned and reproducible.** Actions are pinned to a commit SHA, and tool versions (Terraform, tflint, trivy, checkov, conftest) are pinned in the workflow.
 7. **Same checks locally and in CI.** CI calls `lzctl check` and `make` targets rather than duplicating logic in YAML, so a developer can reproduce any failure.
 
 ## Branches
@@ -59,7 +59,7 @@ Until `main` exists, `dev` is both trunk and the only deploy target. Promotion t
 
 - **CI: Docs:** markdown lint, link check, and the repo's content rules.
 - **CI: Workflows:** actionlint, zizmor (workflow security audit) and the SHA-pinning check.
-- **CI: Terraform:** `terraform fmt -check`, `validate`, tflint, trivy, conftest (including the ADR-012 tag rule), then `plan`, posted as a PR comment.
+- **CI: Terraform:** `terraform fmt -check`, `validate`, tflint, trivy, checkov, conftest (including the ADR-012 tag rule), then `plan`, posted as a PR comment.
 - **CI: Skill:** `pip install -r tests/requirements.txt && python -m pytest tests`: `lzctl` unit tests, golden render hashes (byte-identical output), rendered YAML checked against FAST's factory schemas, `lzctl check` on every golden render, and the vendored-upstream manifest check. Run it on Python 3.11 and 3.13, because output must not depend on the interpreter.
 - **CI: Evals smoke:** the 8-scenario subset from DESIGN.md. **Ops: Evals full** runs all 25 scenarios x 4 clouds weekly, about $65 per run.
 

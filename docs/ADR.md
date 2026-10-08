@@ -29,6 +29,7 @@ Statuses: **Proposed** (in the design, awaiting reviewer sign-off) · **Accepted
 | [019](#adr-019-every-taggable-resource-carries-both-the-name-and-environment-tags) | Every taggable resource carries both the name and environment tags | Accepted | 2026-10-07 |
 | [020](#adr-020-gcp-output-is-a-vendored-fast-dataset-plus-overlay-templates) | GCP output is a vendored FAST dataset plus overlay templates | Accepted | 2026-10-07 |
 | [021](#adr-021-lzctl-check-verifies-rendered-output-and-says-which-checks-did-not-run) | `lzctl check` verifies rendered output and says which checks did not run | Accepted | 2026-10-08 |
+| [022](#adr-022-trivy-and-checkov-both-scan-rendered-hcl) | Trivy and Checkov both scan rendered HCL | Accepted | 2026-10-08 |
 
 ---
 
@@ -334,6 +335,27 @@ A ruleset was used rather than classic branch protection: rulesets are GitHub's 
 - The check needs no network and no model, so it can run in the validator job (ADR-008) and gives the same result on every host.
 - Integrity detects change, not origin: someone who edits files and re-signs the report passes integrity, and is caught only if the edit breaks a schema. Provenance of the render (who ran it, which spec) belongs to the PR flow in P1.
 - Findings point at rendered files, not spec fields. `lzctl explain` (next) will map them back.
+
+
+---
+
+## ADR-022: Trivy and Checkov both scan rendered HCL
+
+**Status:** Accepted · 2026-10-08 · Refines ADR-021
+
+**Context.** The design lists trivy as a static check (F5). The project owner also asked for Checkov. Both are misconfiguration scanners for Terraform with overlapping GCP coverage, and neither has anything to scan in today's output, which is FAST YAML datasets plus one tfvars file. ADR-021 requires that a check which did not run is never reported as passed.
+
+**Decision.**
+- `lzctl check` runs `trivy config` and `checkov` (terraform framework) over the rendered directory whenever it contains `.tf` files. With no `.tf` file, both are `not_applicable`; with the tool missing, `skipped`.
+- Both run offline: `--skip-check-update` for trivy, `--skip-download` for Checkov, in the rendered directory, with a 120 s timeout. Neither tool's exit code is trusted alone: the JSON report is parsed. A crash, timeout, unparsable output or a Checkov parsing error is a finding, never a pass.
+- Findings keep the tool in the rule (`check.trivy.GCP-0002`, `check.checkov.CKV_GCP_114`) and point at the rendered file. They are not deduplicated across tools: where both flag the same resource, the reviewer sees both IDs.
+- Inline suppression comments (`checkov:skip`, `trivy:ignore`, `tfsec:ignore`) in rendered HCL are a finding (`check.hcl.suppression`). Output comes from templates, so a suppression there is either a template bug or an edit, and either way it must not silently opt out of the scans.
+- Both tools are optional in `lzctl doctor` today. They become required in the validator image, with pinned versions.
+
+**Consequences.**
+- Nothing new runs on today's GCP output, and the report says so. The scanners start working when the networking and security slices emit HCL, or when an `infra/` render is added, with no further `lzctl` change.
+- Two scanners mean two sets of false positives and two version pins in the validator image (ADR-008). If one proves redundant on real HCL, drop it by superseding this ADR, informed by the findings each one actually produced.
+- Excluding a finding that is a known false positive needs a design decision (an allowlist in the spec or the policy pack, reviewed in the PR), not a code comment. No allowlist exists yet.
 
 ---
 

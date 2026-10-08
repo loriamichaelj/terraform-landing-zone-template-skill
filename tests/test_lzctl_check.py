@@ -55,7 +55,7 @@ def test_clean_render_passes(tmp_path, profile):
 
 def test_tools_without_work_are_reported_not_passed(tmp_path):
     status = statuses(lzctl.check_output(render_to(tmp_path))[0])
-    assert {status[name] for name in lzctl.NOT_APPLICABLE} == {"not_applicable"}
+    assert {status[name] for name in [*lzctl.NOT_APPLICABLE, "trivy", "checkov"]} == {"not_applicable"}
 
 
 def test_schema_check_covers_the_rendered_yaml(tmp_path):
@@ -181,3 +181,157 @@ def test_cli_check_text_format(tmp_path):
 def test_cli_check_errors_exit_two(tmp_path):
     assert run_cli("check", str(tmp_path / "missing")).returncode == 2
     assert run_cli("check", str(tmp_path)).returncode == 2
+
+
+# --- HCL scanners (trivy, checkov) -------------------------------------------
+
+BUCKET_TF = '''resource "google_storage_bucket" "b" {
+  name     = "example-bucket"
+  location = "US"
+}
+'''
+needs_trivy = pytest.mark.skipif(not shutil.which("trivy"), reason="trivy not installed")
+needs_checkov = pytest.mark.skipif(not shutil.which("checkov"), reason="checkov not installed")
+
+
+def with_hcl(tmp_path: Path, text: str = BUCKET_TF) -> Path:
+    out = render_to(tmp_path)
+    (out / "main.tf").write_text(text)
+    resign(out)
+    return out
+
+
+def completed(stdout: str = "", returncode: int = 0, stderr: str = "") -> subprocess.CompletedProcess:
+    return subprocess.CompletedProcess([], returncode, stdout, stderr)
+
+
+def fake_tools(monkeypatch, trivy=None, checkov=None):
+    """Pretend both scanners are installed and answer with the given results (or exceptions)."""
+    answers = {"trivy": trivy, "checkov": checkov}
+    monkeypatch.setattr(lzctl.shutil, "which", lambda name: f"/fake/{name}" if name in answers else None)
+
+    def run(argv, **kwargs):
+        answer = answers[Path(argv[0]).name]
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(lzctl.subprocess, "run", run)
+
+
+TRIVY_FAIL = json.dumps({"Results": [
+    {"Target": "main.tf", "Misconfigurations": [
+        {"ID": "GCP-0002", "Title": "Uniform access disabled", "Severity": "MEDIUM", "Status": "FAIL",
+         "CauseMetadata": {"Resource": "google_storage_bucket.b"}},
+        {"ID": "GCP-0001", "Title": "Passing rule", "Severity": "LOW", "Status": "PASS"},
+    ]},
+    {"Target": "."},
+]})
+CHECKOV_FAIL = json.dumps({"summary": {"parsing_errors": 0}, "results": {"failed_checks": [
+    {"check_id": "CKV_GCP_114", "check_name": "Public access prevention", "file_path": "/main.tf", "resource": "google_storage_bucket.b"},
+]}})
+CLEAN_TRIVY = json.dumps({"Results": [{"Target": "main.tf", "MisconfSummary": {"Successes": 3, "Failures": 0}}]})
+CLEAN_CHECKOV = json.dumps({"summary": {"parsing_errors": 0}, "results": {"failed_checks": []}})
+
+
+def test_scanners_report_findings_per_tool(tmp_path, monkeypatch):
+    out = with_hcl(tmp_path)
+    fake_tools(monkeypatch, completed(TRIVY_FAIL), completed(CHECKOV_FAIL, returncode=1))
+    checks, findings = lzctl.check_output(out)
+    assert statuses(checks)["trivy"] == "failed" and statuses(checks)["checkov"] == "failed"
+    assert [(f["rule"], f["path"]) for f in findings] == [("check.checkov.CKV_GCP_114", "main.tf"), ("check.trivy.GCP-0002", "main.tf")]
+    assert "google_storage_bucket.b" in findings[1]["message"] and "[MEDIUM]" in findings[1]["message"]
+
+
+def test_clean_scans_pass(tmp_path, monkeypatch):
+    out = with_hcl(tmp_path)
+    fake_tools(monkeypatch, completed(CLEAN_TRIVY), completed(CLEAN_CHECKOV))
+    checks, findings = lzctl.check_output(out)
+    assert findings == [] and statuses(checks)["trivy"] == statuses(checks)["checkov"] == "passed"
+
+
+def test_scanners_are_skipped_when_not_installed(tmp_path, monkeypatch):
+    out = with_hcl(tmp_path)
+    monkeypatch.setattr(lzctl.shutil, "which", lambda name: None)
+    checks, findings = lzctl.check_output(out)
+    assert findings == [] and statuses(checks)["trivy"] == statuses(checks)["checkov"] == "skipped"
+
+
+@pytest.mark.parametrize("bad", [
+    completed("not json"),
+    completed("[]"),
+    completed("", returncode=2, stderr="boom\nmore"),
+    subprocess.TimeoutExpired("trivy", 120),
+    OSError("cannot execute"),
+])
+def test_trivy_failures_are_findings_not_passes(tmp_path, monkeypatch, bad):
+    out = with_hcl(tmp_path)
+    fake_tools(monkeypatch, trivy=bad, checkov=completed(CLEAN_CHECKOV))
+    checks, findings = lzctl.check_output(out)
+    assert statuses(checks)["trivy"] == "failed" and rules(findings) == {"check.trivy.error"}
+
+
+@pytest.mark.parametrize("bad", [completed("not json"), completed("", returncode=2, stderr="crash"), subprocess.TimeoutExpired("checkov", 120)])
+def test_checkov_failures_are_findings_not_passes(tmp_path, monkeypatch, bad):
+    out = with_hcl(tmp_path)
+    fake_tools(monkeypatch, trivy=completed(CLEAN_TRIVY), checkov=bad)
+    checks, findings = lzctl.check_output(out)
+    assert statuses(checks)["checkov"] == "failed" and rules(findings) == {"check.checkov.error"}
+
+
+def test_checkov_parsing_errors_are_findings(tmp_path, monkeypatch):
+    out = with_hcl(tmp_path)
+    parse_error = json.dumps({"summary": {"parsing_errors": 1}, "results": {"failed_checks": []}})
+    fake_tools(monkeypatch, completed(CLEAN_TRIVY), completed(parse_error))
+    assert rules(lzctl.check_output(out)[1]) == {"check.checkov.parse"}
+
+
+def test_checkov_accepts_a_list_of_reports(tmp_path, monkeypatch):
+    out = with_hcl(tmp_path)
+    fake_tools(monkeypatch, completed(CLEAN_TRIVY), completed(f"[{CHECKOV_FAIL}, {CLEAN_CHECKOV}]", returncode=1))
+    assert rules(lzctl.check_output(out)[1]) == {"check.checkov.CKV_GCP_114"}
+
+
+@pytest.mark.parametrize("comment", ["#checkov:skip=CKV_GCP_114:no", "# trivy:ignore:GCP-0002", "// tfsec:ignore:google-storage"])
+def test_inline_suppressions_are_refused(tmp_path, monkeypatch, comment):
+    out = with_hcl(tmp_path, comment + "\n" + BUCKET_TF)
+    fake_tools(monkeypatch, completed(CLEAN_TRIVY), completed(CLEAN_CHECKOV))
+    assert rules(lzctl.check_output(out)[1]) == {"check.hcl.suppression"}
+
+
+def test_scanners_run_inside_the_rendered_directory_without_network_flags(tmp_path, monkeypatch):
+    out = with_hcl(tmp_path)
+    seen = []
+
+    def run(argv, **kwargs):
+        seen.append((Path(argv[0]).name, argv, kwargs["cwd"], kwargs["timeout"]))
+        return completed(CLEAN_TRIVY if "trivy" in argv[0] else CLEAN_CHECKOV)
+
+    monkeypatch.setattr(lzctl.shutil, "which", lambda name: f"/fake/{name}" if name in ("trivy", "checkov") else None)
+    monkeypatch.setattr(lzctl.subprocess, "run", run)
+    lzctl.check_output(out)
+    by_tool = {name: (argv, cwd, timeout) for name, argv, cwd, timeout in seen}
+    assert by_tool["trivy"][0].count("--skip-check-update") == 1 and "--skip-download" in by_tool["checkov"][0]
+    assert all(cwd == out and timeout == lzctl.SCAN_TIMEOUT for _, cwd, timeout in by_tool.values())
+
+
+@needs_trivy
+def test_real_trivy_flags_a_misconfigured_bucket(tmp_path):
+    exe = shutil.which("trivy")
+    check, findings = lzctl._scan_trivy(exe, with_hcl(tmp_path))
+    assert check["status"] == "failed"
+    assert any(f["rule"] == "check.trivy.GCP-0002" and f["path"] == "main.tf" for f in findings)
+
+
+@needs_checkov
+def test_real_checkov_flags_a_misconfigured_bucket(tmp_path):
+    exe = shutil.which("checkov")
+    check, findings = lzctl._scan_checkov(exe, with_hcl(tmp_path))
+    assert check["status"] == "failed"
+    assert any(f["rule"].startswith("check.checkov.CKV_GCP") and f["path"] == "main.tf" for f in findings)
+
+
+@needs_trivy
+def test_real_trivy_passes_hcl_with_no_findings(tmp_path):
+    out = with_hcl(tmp_path, 'variable "name" {\n  type = string\n}\n')
+    assert lzctl._scan_trivy(shutil.which("trivy"), out) == ({"name": "trivy", "status": "passed", "detail": "no misconfigurations"}, [])

@@ -55,7 +55,7 @@ Composes **Fabric FAST**, **Azure Verified Modules** and **Control Tower + AFT**
 <td valign="top">
 
 ### 🛡️ Validated before you see it
-fmt · validate · tflint · trivy · OPA policies · upstream schemas, in an **isolated job with no network access**. Failures are fixed in the spec, not the code.
+fmt · validate · tflint · trivy · checkov · OPA policies · upstream schemas, in an **isolated job with no network access**. Failures are fixed in the spec, not the code.
 
 </td>
 <td valign="top">
@@ -136,7 +136,7 @@ python -m pytest tests                                       # unit and render t
 
 ## 🗺️ Roadmap
 
-- [x] **Design:** architecture, spec schema, cost model, 21 ADRs
+- [x] **Design:** architecture, spec schema, cost model, 22 ADRs
 - [x] **CI foundation:** OIDC per GitHub environment, Terraform state, Secret Manager + KMS, environment folders
 - [x] **Community:** license, contributing guide, issue forms, Discussions, protected `dev` branch
 - [ ] **P0, core + GCP:** spec schema ✓, `lzctl` (validate, render, check ✓; explain next), validator image, eval harness, FAST datasets (`0-org-setup` ✓; networking and security next)

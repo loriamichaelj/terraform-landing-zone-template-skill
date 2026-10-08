@@ -29,7 +29,7 @@ Run `scripts/lzctl doctor` first if `lzctl` fails to start. It needs Python 3.11
 
 ## Status
 
-Implemented: `lzctl spec validate`, `render` (GCP `0-org-setup` dataset, `starter` and `standard` profiles), `check` (integrity, upstream schemas, `terraform fmt`), `doctor`. Not yet: `explain`, networking and security datasets, the `regulated` profile (render refuses it). The output today is a validated spec and a rendered dataset, not a pull request.
+Implemented: `lzctl spec validate`, `render` (GCP `0-org-setup` dataset, `starter` and `standard` profiles), `check` (integrity, upstream schemas, `terraform fmt`; trivy and checkov once HCL is rendered), `doctor`. Not yet: `explain`, networking and security datasets, the `regulated` profile (render refuses it). The output today is a validated spec and a rendered dataset, not a pull request.
 
 ## References
 

@@ -32,6 +32,8 @@ Statuses: **Proposed** (in the design, awaiting reviewer sign-off) · **Accepted
 | [022](#adr-022-trivy-and-checkov-both-scan-rendered-hcl) | Trivy and Checkov both scan rendered HCL | Accepted | 2026-10-08 |
 | [023](#adr-023-the-render-report-records-which-spec-fields-drive-each-file-and-lzctl-explain-reads-it) | The render report records which spec fields drive each file, and `lzctl explain` reads it | Accepted | 2026-10-08 |
 | [024](#adr-024-the-2-networking-stage-is-rendered-from-the-peering-dataset-with-a-fixed-cidr-plan) | The 2-networking stage is rendered from the peering dataset with a fixed CIDR plan | Accepted | 2026-10-08 |
+| [025](#adr-025-prometheus-metrics-and-grafana-dashboards-for-the-agent-platform) | Prometheus metrics and Grafana dashboards for the agent platform | Proposed | 2026-10-08 |
+| [026](#adr-026-this-platform-is-deployed-in-dev-only-and-defaults-are-chosen-for-minimum-cost) | This platform is deployed in dev only, and defaults are chosen for minimum cost | Proposed | 2026-10-08 |
 
 ---
 
@@ -402,6 +404,63 @@ A ruleset was used rather than classic branch protection: rulesets are GitHub's 
 - Starter (`single`) renders no networking: upstream has no single-VPC dataset, and writing one is a separate decision.
 - Bumping FAST means re-vendoring both stages, checking `NETWORKING_DROPPED` and the DNS patches, and a full eval run.
 
+
+---
+
+## ADR-025: Prometheus metrics and Grafana dashboards for the agent platform
+
+**Status:** Proposed · 2026-10-08 · Requested by the project owner · Extends the telemetry in DESIGN.md · **Deferred:** scoped only; nothing is built or run until after G2 (owner decision, 2026-10-08)
+
+**Context.** DESIGN.md specifies traces (Cloud Trace), logs (Cloud Logging, BigQuery) and burn-rate alerts, but no metrics layer and no dashboards, so the SLIs (run success, p95 latency, first-pass rate, critical findings, cost per run) have nothing to be read from, and gate G2 ("latency and cost per run measured") has no instrument. The project owner asked to scope Prometheus and Grafana. The platform is serverless (Cloud Run service and job), so there is no node to run a Prometheus server on, and requirements data is internal-confidential, which constrains what metrics may carry.
+
+**Decision.**
+- **Scope:** the agent's own platform (`lz-agent`, `lz-validator`) in `dev`, the only environment (ADR-026), delivered in P1 with the agent. Prometheus and Grafana inside generated landing zones are out of scope (DESIGN.md non-goal, open question).
+- **Metrics:** Prometheus data model and PromQL, stored in Google Cloud Managed Service for Prometheus. The agent exposes `/metrics` and a Prometheus sidecar sends it. The validator job, which can't be scraped, pushes OTLP metrics. We do not run a Prometheus server.
+- **Dashboards:** Grafana OSS as its own Cloud Run service (`lz-grafana`, identity `lz-grafana-sa` with `roles/monitoring.viewer` only), behind IAP, stateless, scaling to zero and limited to one instance. Dashboards and the data source are JSON and YAML under `observability/`, provisioned at start and changed only by reviewed pull request. The image is copied into Artifact Registry and pinned by digest.
+- **Alerts:** PromQL conditions in Cloud Monitoring alert policies, defined in `observability/alerts/` and deployed by Terraform. Grafana alerting is off, so alerts have one home.
+- **Metric contract and label rules** are in DESIGN.md. Labels come from small fixed sets. No organization, domain, spec field, user, session or run ID goes in a label, and a test enforces the allowlist.
+- **Tags and secrets:** the Cloud Run service and Artifact Registry repository carry both tags (ADR-012, ADR-019); Grafana's secret key lives in Secret Manager as `<environment>-grafana-secret-key` (ADR-014).
+- **CI:** `ci-observability.yml` lints dashboards and PromQL with `promtool`. No new third-party action is needed.
+- **Deferral:** the owner does not want Prometheus or Grafana running for now, to keep spend down (ADR-026). No `observability/` directory, sidecar, Grafana service or alert policy is created in P0 or P1. Until it is built, every run writes a structured run record (outcome, duration, findings, tokens, model and skill versions) to Cloud Logging and the audit log, and G2's latency and cost per run are read from those. The metric contract above is the scope for when this is picked up, which is after G2 and once a second person needs dashboards.
+
+**Alternatives considered.**
+- *Cloud Monitoring dashboards only.* No new service, but dashboards aren't portable or reviewable as code in the same way and can't reuse PromQL or community Grafana content. It stays the fallback and the home of alerts.
+- *A self-run Prometheus server.* Needs a VM or GKE, storage and high availability for a handful of series.
+- *Grafana Cloud.* Takes operational data out of the organization, which conflicts with the data residency requirement, and needs data governance approval.
+- *Grafana with a Cloud SQL backend.* Adds a database and a VPC for state that is already in Git.
+
+**Consequences.**
+- While deferred it costs nothing and adds no engineer time. When built, it adds about one engineer-week and about $1 to $3 a month in `dev` (DESIGN.md cost estimate), and gate G2 can be read from dashboards instead of logs.
+- Metric names are provisional until the agent exists, and `agent/` must expose them. Changing the contract later means changing dashboards and alerts together.
+- One more public-facing service to keep patched. The mitigations are IAP, a viewer-only identity, no anonymous access and a pinned image.
+- Samples are billed ($0.06 per million, first tier), so a label that explodes in cardinality costs money as well as clarity. A budget alert on Monitoring spend covers it.
+- **Not yet verified, so the first task when this is picked up is a spike:** (1) how Grafana authenticates to Managed Service for Prometheus from Cloud Run, given that Google calls the frontend proxy legacy, with the Cloud Monitoring data source in PromQL mode as the fallback; (2) whether sidecars are supported on Cloud Run jobs, with log-based metrics as the fallback for the validator; (3) whether Grafana can verify IAP's signed header for single sign-on; (4) that Grafana's usage stays inside the Cloud Run free tier at min instances 0. If any of these fails, this ADR is revised before building.
+
+
+---
+
+## ADR-026: This platform is deployed in dev only, and defaults are chosen for minimum cost
+
+**Status:** Proposed · 2026-10-08 · Requested by the project owner · Amends ADR-015 (the later `main` and `prod`) and ADR-025; consistent with ADR-017, whose empty `stage` and `prod` folders stay
+
+**Context.** The owner will build and run this platform in `dev` only and wants cost cut sharply. The design had assumed `dev` plus `prod`, an always-on Cloud Run instance, Gemini 3.1 Pro (a preview model) for review, and scheduled model evals. Priced out (DESIGN.md), that was about $110 to $390 a month to run plus $300 to $600 a month of eval spend while building. Most of the cloud bill was tokens, the second environment and evals, not idle infrastructure.
+
+**Decision.**
+- **One environment.** The platform deploys to `dev` only. There is no `prod`, no `stage`, no `main` release branch, no `dev-plan` split until someone else depends on the platform. The `stage` and `prod` folders (ADR-017) stay empty and cost nothing, and the `stage`, `prod` and `main` rows in CICD.md are marked not planned. This is about this platform's own deployment: the spec's `hierarchy.environments` still lists whatever environments the customer's landing zone has.
+- **Scale to zero.** The agent service runs with min instances 0 and max 1 and per-request billing; the validator is a job; Grafana (ADR-025, deferred) would scale to zero. Sessions are in Firestore, so a cold start costs seconds, not state.
+- **Flash for everything.** Intake and review use Gemini 3 Flash. A Pro model is an escalation to add only if the golden set shows Flash falls short on review. This also removes the dependency on a preview model.
+- **Evals.** Deterministic evals (golden hashes, schema, `lzctl check`) run in CI and cost nothing. Model-backed evals run only on demand (`ops-evals.yml`, manual) and before a release, with a monthly budget cap that stops the workflow. No scheduled full runs.
+- **Model Armor** is optional in `dev`. Enable it if its price at this volume is a few dollars a month. If it is not, the other injection defences stand (typed `lzctl` arguments, workflow-enforced gates, no write credentials in reach, requirements treated as data) and the gap is recorded in the PR body and the risk table.
+- **Housekeeping that keeps free tiers free:** 30-day lifecycle on artifacts, Artifact Registry keeps the last 5 images, a log exclusion for debug noise, and a budget alert on the project.
+- **Not changed:** CMEK (ADR-014), tags (ADR-012, ADR-019), IAP, validator isolation and the human approval gate. They cost cents and are the reason an adopter can trust the output.
+
+**Consequences.**
+- Running cost falls to about $10 to $45 a month (about $15 to $70 with capped model evals), from about $410 to $990 all-in, and tokens are most of what remains.
+- There is no production copy to promote to. A bad deploy reaches every user at once, so the deterministic CI and the pilot's trust matter more. Adding `prod` later means a new ADR, a GitHub environment, a service account and a release branch.
+- Review quality on Flash is unmeasured. It is a bet, checked against the golden set before G2, and reversed by switching the review step's model.
+- The remaining big cost is engineer time: P2 and P3 (Azure, AWS, OpenStack, hardening) are about $58K to $82K of the $100K to $140K build estimate. Dev-only does not change that; deferring those phases would.
+- Cost numbers use free tiers and list prices that are not all verified yet (see the review log's unverified list).
+
 ---
 
 ## Review log
@@ -447,6 +506,8 @@ A ruleset was used rather than classic branch protection: rulesets are GitHub's 
 - Whether Gemini 3.5 Flash is GA in our region (third-party sources list it at $1.50/$9 per 1M tokens); Gemini 3.5 Pro was unreleased as of early October 2026.
 - Whether Agent Identity (SPIFFE-based) can be used by a Cloud Run-hosted agent, or only by Agent Runtime.
 - Grok Build's project skill folder: run `grok inspect` in this repo to confirm it finds the skill.
+- Observability (ADR-025): Grafana to Managed Service for Prometheus authentication from Cloud Run, sidecar support on Cloud Run jobs, IAP header sign-on in Grafana, and Grafana's usage against the free tier at min instances 0.
+- Cost cuts (ADR-026): Cloud Run's monthly free tier amounts, Model Armor pricing at 50 runs a month, whether Gemini 3 Flash is good enough for review (an eval question), the cached-input rate for Flash, and that the Artifact Registry and KMS volumes stay under a few dollars.
 - Roadmap phases and gates were reconstructed from the draft's text, because the original embedded roadmap was not in the file. The engineer-week totals match the cost table; confirm the phase boundaries with the author.
 
 ### 2026-10-07: Build-out and docs sweep

@@ -20,7 +20,7 @@ This covers how code in this repo is tested, released and deployed: branches, en
 | --- | --- | --- |
 | `dev` (default) | Integration branch; every change lands here by pull request with a code-owner approval, enforced by the **dev: pull requests only** ruleset (only the repo admin can bypass, [ADR-018](ADR.md#adr-018-dev-accepts-changes-only-by-pull-request-except-the-owner)) | `dev` environment, on merge |
 | `feature/*`, `fix/*`, `docs/*`, `ci/*` | Short-lived work branches | Nothing; plan-only |
-| `main` (later) | Release branch, created when a production environment exists | `prod`, by promotion |
+| `main` (not planned) | Would be the release branch if a production environment is ever added (ADR-026) | n/a |
 
 Until `main` exists, `dev` is both trunk and the only deploy target. Promotion to production will be a pull request from `dev` to `main` (or a signed tag), deploying the same image digest that passed in `dev`.
 
@@ -31,7 +31,7 @@ Until `main` exists, `dev` is both trunk and the only deploy target. Promotion t
 | `bootstrap` | `lz-bootstrap-sa` | Foundational infra for the agent's own platform: APIs, KMS, Artifact Registry, networking | Manual dispatch only | Required reviewer; deploy from `dev` only |
 | `dev` | `lz-dev-sa` | The agent platform's dev deployment (`infra/`, Cloud Run, evals) | Push to `dev`; manual dispatch | Deploy from `dev` only |
 | `dev-plan` (later) | `lz-dev-plan-sa`, read-only | Terraform plan on pull requests | Pull request | None; read-only identity |
-| `prod` (later) | `lz-prod-sa` | Production | Promotion from `main` | Required reviewers, wait timer, `main` only |
+| `prod` (not planned) | n/a | This platform is deployed in `dev` only (ADR-026) | n/a | n/a |
 
 **GCP placement:** `bootstrap` and `dev` both run in project `skills-mjl-27850`, which sits in the `dev` folder. The `stage` and `prod` folders exist (tagged `environment:stage` and `environment:prod`) but stay empty until those environments are needed ([ADR-017](ADR.md#adr-017-environment-folders-and-the-environment-tag)).
 
@@ -46,11 +46,11 @@ Until `main` exists, `dev` is both trunk and the only deploy target. Promotion t
 | `ci-workflows.yml` | CI: Workflows | ci | Every pull request; push to `dev` touching `.github/**` | none | Now | **Built** |
 | `ci-terraform.yml` | CI: Terraform | ci | Pull request touching `infra/**` | `dev-plan` | P0 | Planned |
 | `ci-skill.yml` | CI: Skill | ci | Every pull request; push to `dev` touching the skill, tests, evals or tools | none | P0 | **Built** |
-| `ci-evals.yml` | CI: Evals smoke | ci | Pull request touching skill, agent or templates | `dev` | P0 | Planned |
-| `ops-evals-full.yml` | Ops: Evals full suite | ops | Weekly schedule; manual | `dev` | P0 | Planned |
+| `ops-evals.yml` | Ops: Evals | ops | Manual only, with a `scope` input (`smoke` or `full`) | `dev` | P0 | Planned |
 | `cd-infra-bootstrap.yml` | CD: Infra (bootstrap) | cd | Manual | `bootstrap` | P1 | Planned |
 | `cd-infra-dev.yml` | CD: Infra (dev) | cd | Push to `dev` touching `infra/**` | `dev` | P1 | Planned |
 | `cd-agent-dev.yml` | CD: Agent (dev) | cd | Push to `dev` touching `agent/**`, `validator/**` | `dev` | P1 | Planned |
+| `ci-observability.yml` | CI: Observability | ci | Every pull request | none | Deferred (ADR-025) | Not planned yet |
 | `release-skill.yml` | Release: Skill | release | Tag `skill-v*` | none | P1 | Planned |
 | `reusable-terraform.yml` | Reusable: Terraform | reusable | `workflow_call` | caller's | P0 | Planned |
 | `reusable-gcp-auth.yml` | Reusable: GCP auth | reusable | `workflow_call` | caller's | P0 | Planned |
@@ -61,7 +61,8 @@ Until `main` exists, `dev` is both trunk and the only deploy target. Promotion t
 - **CI: Workflows:** actionlint, zizmor (workflow security audit, online so it also checks pinned SHAs against their repos) and `tools/check_workflows.py`, which enforces this document: file and workflow names, `permissions: {}`, job timeouts, `ubuntu-24.04`, SHA pins with a version comment, allowed publishers, and no `pull_request_target`. actionlint is downloaded and verified against a pinned SHA-256, so no third-party action is needed. Like CI: Skill it has no path filter on pull requests.
 - **CI: Terraform:** `terraform fmt -check`, `validate`, tflint, trivy, checkov, conftest (including the ADR-012 tag rule), then `plan`, posted as a PR comment.
 - **CI: Skill:** `pip install -r tests/requirements.txt && python -m pytest tests`: `lzctl` unit tests, golden render hashes (byte-identical output), rendered YAML checked against FAST's factory schemas, `lzctl check` on every golden render, and the vendored-upstream manifest check. It runs on Python 3.11 and 3.13, because output must not depend on the interpreter, and installs Terraform, trivy and checkov at pinned versions with `REQUIRE_TOOLS=1`, so a broken tool install fails the job instead of skipping the real-scanner tests. It has no path filter on pull requests: a path-filtered workflow that is skipped leaves a required check pending forever, and the suite takes about a minute.
-- **CI: Evals smoke:** the 8-scenario subset from DESIGN.md. **Ops: Evals full** runs all 25 scenarios x 4 clouds weekly, about $65 per run.
+- **CI: Observability (deferred, ADR-025):** Grafana dashboards and provisioning files parse and use the data source variable, no dashboard hard-codes a project ID, and PromQL alert definitions pass `promtool` (pinned, downloaded and checksum-verified like actionlint). It runs on every pull request, without a path filter, so it can become a required check.
+- **Evals:** the deterministic ones (golden render hashes, schema and `lzctl check` on every golden spec) already run in CI: Skill and cost nothing. **Ops: Evals** is manual and spends model tokens: `smoke` is the 8-scenario subset, `full` is every scenario for the clouds that exist. It refuses to start if the month's eval spend is over the cap, so it can't run away (ADR-026).
 
 ## Naming conventions
 
@@ -158,6 +159,6 @@ Required status checks are named `<workflow name> / <job name>`, so renaming a w
 
 - [x] **Branch protection timing:** the `dev` ruleset was added on 2026-10-07, before any CI checks exist; status checks get added to it as workflows land (ADR-018).
 - [ ] **`dev-plan` identity:** create it in P0 with `infra/`, or plan with `lz-dev-sa` until the first real deploy?
-- [ ] **Production:** when to create `main` and `prod`, and who approves promotions? The GCP `stage` and `prod` folders exist but stay empty until then ([ADR-017](ADR.md#adr-017-environment-folders-and-the-environment-tag)).
-- [ ] **Stage:** add a `stage` environment to the pipeline between `dev` and `prod`, or keep promoting straight from `dev`? Decide when the `stage` folder is first populated.
-- [ ] **Eval spend:** is $65 per weekly full run (about $280 a month) acceptable for CI, separate from the run cost in DESIGN.md?
+- [x] **Production:** decided against, for now: this platform is deployed in `dev` only (ADR-026). Revisit when someone other than the owner depends on it. Original question: when to create `main` and `prod`, and who approves promotions? The GCP `stage` and `prod` folders exist but stay empty until then ([ADR-017](ADR.md#adr-017-environment-folders-and-the-environment-tag)).
+- [x] **Stage:** no `stage` environment for this platform (ADR-026).
+- [x] **Eval spend:** model-backed evals are on demand under a monthly cap, about $5 to $25 a month (ADR-026). Open: the cap itself, and how the workflow reads the month's spend (a billing export, or a counter it keeps).

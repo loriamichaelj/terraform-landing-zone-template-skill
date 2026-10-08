@@ -49,6 +49,7 @@ The MVP succeeds when a platform engineer can go from a requirements conversatio
 - Freeform HCL authoring or new module development.
 - Mixing clouds in one run: one spec targets one cloud; a multi-cloud estate is several specs.
 - Day-2 operations: drift detection, upgrades, or tenant onboarding.
+- Prometheus and Grafana inside the landing zones the agent generates. They monitor this system's own platform only (ADR-025).
 
 ## Requirements
 
@@ -76,6 +77,7 @@ Functional requirements define what the agent produces; non-functional requireme
 | Determinism | Same spec plus same skill version renders byte-identical output |
 | Latency | p95 end-to-end under 5 minutes from confirmed spec to PR (target; validate in P1) |
 | Cost | Token and compute cost per run tracked and reported per team |
+| Observability | Every run writes a structured run record (outcome, duration, findings, tokens, model and skill versions) that the SLIs below can be computed from. Prometheus metrics, Grafana dashboards and burn-rate alerts are scoped but deferred (ADR-025); when built, metric labels never carry requirements content |
 | Data residency | All storage and model calls pinned to approved regions |
 | Encryption | CMEK on storage holding specs, artifacts and logs |
 
@@ -104,6 +106,10 @@ flowchart LR
 
   job --> gcs
   agent --> bq[("BigQuery<br/>audit log")]
+  agent -.->|/metrics, Prometheus sidecar| gmp[("Managed Service<br/>for Prometheus<br/>(deferred, ADR-025)")]
+  job -.->|OTLP metrics| gmp
+  gmp --> graf["Grafana on Cloud Run<br/>(deferred, ADR-025)"]
+  gmp --> alerts["Cloud Monitoring<br/>alert policies"]
   agent -->|GitHub App key from Secret Manager| pr["Pull request<br/>target repo"]
   pr -->|CODEOWNERS approval| pipeline["Existing apply pipeline<br/>(outside this system)"]
 ```
@@ -309,7 +315,7 @@ The agent's own infrastructure is defined in Terraform in the same repo and depl
 
 | Component | GCP service | Notes |
 | --- | --- | --- |
-| Agent service | Cloud Run service | ADK 2.0 app container; IAP enabled on the service; min instances 1 to avoid cold starts mid-conversation |
+| Agent service | Cloud Run service | ADK 2.0 app container; IAP enabled on the service; min instances 0 and max 1 (sessions live in Firestore, so a cold start loses nothing; ADR-026) |
 | Validator | Cloud Run Job | Image with terraform, tflint, trivy, checkov, conftest and a provider/module filesystem mirror; Direct VPC egress into a subnet with deny-all egress firewall; one execution per validation |
 | Images | Artifact Registry | Vulnerability scanning on; images signed and enforced with Binary Authorization |
 | Session state | Firestore (native mode) | ADK session store |
@@ -319,6 +325,9 @@ The agent's own infrastructure is defined in Terraform in the same repo and depl
 | Audit log | BigQuery | Log sink plus explicit run records |
 | Model | Gemini via Gemini Enterprise Agent Platform | Regional endpoint; model version pinned in config |
 | Prompt security | Model Armor | Template applied to agent input and output |
+| Metrics (deferred) | Managed Service for Prometheus | Not built or run for now (ADR-025). Prometheus sidecar on the agent service scrapes `/metrics`; the validator job pushes OTLP; no Prometheus server to run (ADR-025) |
+| Dashboards (deferred) | Cloud Run service (Grafana OSS) | Not built or run for now (ADR-025). IAP; read-only `roles/monitoring.viewer` identity; stateless, max 1 instance, dashboards and data sources provisioned from `observability/`; image copied to Artifact Registry and pinned by digest |
+| Alerts (deferred) | Cloud Monitoring alert policies | Not built for now (ADR-025). PromQL conditions defined in `observability/alerts/` and deployed by Terraform; Grafana is for looking, not for alerting |
 
 **Resource tagging**
 
@@ -368,6 +377,7 @@ agent/                # ADK app: workflow, nodes, tools, callbacks
 .agents/skills/       # landing-zone skill package, all clouds, lzctl (canonical copy)
 .gemini/skills/       # symlink to .agents/skills/
 validator/            # job image and entrypoint
+observability/        # Grafana dashboards and provisioning, PromQL alert definitions (deferred, not written; ADR-025)
 infra/                # Terraform for the agent's own platform
 evals/                # golden specs (evals/gcp/valid) and render hashes (evals/gcp/golden)
 tests/                # lzctl unit and render tests (pytest)
@@ -382,7 +392,7 @@ Built so far: `docs/`, `.github/` and the community files (LICENSE, CONTRIBUTING
 
 1. On PR to `dev`: unit tests, template render tests, ADK eval smoke set, Terraform plan for `infra/`.
 2. On merge to `dev`: build and sign images, apply `infra/` to the `dev` environment, deploy to dev, smoke test.
-3. Later, promote to production from `main` by manual approval, deploying the same image digest.
+3. There is no production deployment of this platform: `dev` is the only environment, and `main`, `prod` and `stage` are not planned (ADR-026).
 
 Skill releases follow the same flow, because a skill change can alter output as much as a code change.
 
@@ -405,12 +415,55 @@ Quality is measured by evals before release and by SLOs in production; a model o
 - OpenTelemetry traces from ADK into Cloud Trace, with model version, skill version and run ID on every span.
 - Structured logs to Cloud Logging, sunk to BigQuery for analysis.
 - Burn-rate alerts on run success rate (fast and slow windows) routed to the owning team's on-call.
+- Prometheus metrics for every SLI, stored in Managed Service for Prometheus and shown in Grafana, are scoped in the next section and deferred. Until then, the SLIs come from the run records.
+
+**Metrics and dashboards (Prometheus and Grafana): scoped, deferred**
+
+Not built or run for now (owner decision, 2026-10-08, ADR-025). This section is the scope for when they are built, which is after G2 and once a second person needs dashboards. Until then G2's latency and cost per run are read from the run records in Cloud Logging and the audit log, and nothing here costs money.
+
+Scope: the agent's own platform (the `lz-agent` service and the `lz-validator` job) in `dev`, the only environment (ADR-026). Landing zones the agent generates are out of scope; offering Prometheus and Grafana in them would be a new spec block and is an open question. Decision and alternatives: ADR-025.
+
+How it fits together:
+
+- **Collection.** The agent exposes `/metrics` in Prometheus format, and a Prometheus sidecar on the Cloud Run service sends it to Managed Service for Prometheus. The validator is a short-lived job that can't be scraped, so it pushes OTLP metrics (or, if sidecars don't work on jobs, its metrics come from structured logs through log-based metrics).
+- **Storage and query.** Managed Service for Prometheus holds the metrics and answers PromQL. There is no Prometheus server to run, patch or keep highly available.
+- **Dashboards.** Grafana OSS runs as its own Cloud Run service behind IAP and reads with a viewer-only identity. It is stateless: dashboards and the data source are provisioned from files in `observability/`, so a lost instance loses nothing but personal preferences, and a dashboard change is a reviewed pull request.
+- **Alerts.** Burn-rate and error alerts are PromQL conditions in Cloud Monitoring alert policies, defined in `observability/alerts/` and deployed by Terraform. Grafana alerting stays off, so there is one place alerts live.
+
+**Metric contract** (names are provisional until the agent exists; `lz_` prefix, base units)
+
+| Metric | Type | Labels | Feeds |
+| --- | --- | --- | --- |
+| `lz_runs_total` | counter | `cloud`, `profile`, `outcome` (`pr_opened`, `failed`, `rejected`, `abandoned`) | Run success rate |
+| `lz_run_duration_seconds` | histogram | `cloud`, `profile`, `outcome` | End-to-end latency (p95) |
+| `lz_validation_findings_total` | counter | `cloud`, `severity`, `rule` | Critical findings in PRs |
+| `lz_validation_first_pass_total` | counter | `cloud`, `result` (`clean`, `needed_review`) | First-pass validation rate |
+| `lz_review_iterations` | histogram | `cloud` | Review loop depth (limit is 3) |
+| `lz_model_tokens_total` | counter | `model`, `direction` (`in`, `out`, `cached`) | Cost per run |
+| `lz_model_requests_total` | counter | `model`, `status` | Model errors and quota exhaustion |
+| `lz_validator_duration_seconds` | histogram | `cloud`, `result` | Validator health |
+| `lz_github_requests_total` | counter | `operation`, `status` | PR creation failures |
+| `lz_build_info` | gauge (1) | `agent_version`, `skill_version`, `baseline` | Which version produced the numbers |
+
+**Label rules.** Labels are small fixed sets. Never put an organization ID, domain, spec field, user, session or run ID in a label: requirements are internal-confidential, and unbounded labels blow up cost and cardinality. Run IDs belong on traces and logs, where the 28-day SLI can still be traced to a run. A test on the metrics endpoint enforces the label allowlist.
+
+**Dashboards** (provisioned, one folder, data source chosen by variable)
+
+| Dashboard | Shows |
+| --- | --- |
+| Service health | The SLIs against their targets, error budget burn, Cloud Run instances and latency |
+| Runs and validation | Run funnel by outcome, findings by severity and rule, first-pass rate, review loop depth, validator duration |
+| Model and cost | Tokens by model, estimated cost per run, error and quota rates |
+
+An evals dashboard (pass rate and drift per scenario, from the eval results in BigQuery) is deferred until the eval harness writes results somewhere queryable.
+
+**Not yet verified, check in a spike before building (ADR-025):** how Grafana authenticates to Managed Service for Prometheus from Cloud Run (Google calls the frontend proxy legacy; the Cloud Monitoring data source in PromQL mode is the fallback), whether sidecars are supported on Cloud Run jobs, and whether Grafana can verify IAP's signed header for single sign-on.
 
 **Evals**
 
 - Golden set of 15 to 25 scenarios: small org, regulated (PCI), multi-region, VPC-SC on, conflicting requirements, adversarial input.
 - Each scenario checks the spec against an expected spec (field-level match) and asserts zero critical findings after render.
-- Runs in CI on every agent, skill, template or model-version change.
+- Deterministic evals (spec and render checks, golden hashes) run in CI on every change. Model-backed evals run on demand and before a release, under a spend cap (ADR-026).
 
 **Failure handling**
 
@@ -437,12 +490,12 @@ The chosen design trades some flexibility for reviewability and auditability, wh
 
 ## Delivery plan and milestones
 
-The GCP-first MVP (P0 and P1) is 9 to 12 engineer-weeks; all four clouds and four hosts take 21 to 29 engineer-weeks in total (see Cost estimate).
+The GCP-first MVP (P0 and P1) is 9 to 12 engineer-weeks; all four clouds and four hosts take 21 to 29 engineer-weeks in total, or one more if the deferred observability is built (see Cost estimate).
 
 | Phase | Scope | Engineer-weeks | Exit gate |
 | --- | --- | --- | --- |
 | P0: Core and GCP | Spec schema, `lzctl`, validator image, eval harness, GCP baseline (FAST datasets, policies, evals) | 6 to 8 | **G1:** GCP golden set passes with zero critical findings; render is byte-identical across two hosts |
-| P1: Hosted agent | ADK 2.0 workflow on Cloud Run, agent infra, CI/CD, PR flow, GCP pilot with one team | 3 to 4 | **G2:** pilot team opens a PR from a real requirements session; p95 latency and cost per run measured |
+| P1: Hosted agent | ADK 2.0 workflow on Cloud Run, agent infra, CI/CD, PR flow, run records, GCP pilot with one team | 3 to 4 | **G2:** pilot team opens a PR from a real requirements session; p95 latency and cost per run are read from the run records |
 | P2: Azure, AWS, hosts | AVM ALZ baseline, Control Tower/AFT/SCP baseline, host compatibility testing | 6 to 9 | **G3:** Azure and AWS golden sets pass; host x model eval matrix green for approved hosts |
 | P3: OpenStack and hardening | OpenStack module set, sandbox plan per cloud, security review, documentation, broader rollout | 6 to 8 | None (steady state) |
 
@@ -450,42 +503,45 @@ Phases are gated rather than dated: a phase starts only when the previous gate's
 
 ## Cost estimate
 
-Running the hosted agent costs about $110 to $370 a month for dev plus prod, and model tokens are most of it. Building all four clouds costs about $100K to $140K in engineer time, and maintenance, not cloud spend, is the long-run cost driver.
+This platform is deployed in `dev` only (ADR-026), and everything scales to zero. Running it costs about $10 to $45 a month, or about $15 to $70 with capped model evals, and model tokens are most of it. Prometheus and Grafana are deferred (ADR-025) and add about $1 to $3 a month when built. Before ADR-026 the plan was $110 to $390 a month for dev plus prod plus $300 to $600 for evals while building. Engineer time is the real cost: building all four clouds is about $100K to $140K (about $5K more with the deferred observability), and maintenance, not cloud spend, is the long-run cost driver.
 
-**Assumptions:** us-central1 (Tier 1), 200 prod runs and 50 dev runs a month, Gemini 3 Flash for intake and Gemini 3.1 Pro for review, list prices in USD. Gemini 3.1 Pro was still in preview on Agent Platform as of October 2026, and Pro pricing roughly doubles above 200K prompt tokens, so each call must stay under that. Agent Platform prices can differ from Gemini API list prices; confirm in the pricing calculator before budgeting.
+**Assumptions:** us-central1 (Tier 1), 50 runs a month, Gemini 3 Flash for intake and review (no Pro; see ADR-026), list prices in USD, Cloud Run and other free tiers applied. Agent Platform prices can differ from Gemini API list prices; confirm in the pricing calculator before budgeting.
 
 **Cost per run (hosted agent)**
 
 | Step | Model | Tokens per run | Cost |
 | --- | --- | --- | --- |
 | Intake | Gemini 3 Flash ($0.50 in / $3 out per 1M) | \~150K in, \~10K out | \~$0.11 |
-| Review loop | Gemini 3.1 Pro ($2 in / $12 out per 1M; $0.20 cached in) | \~250K in across calls (60% cached), \~25K out | \~$0.53 |
-| **Total** |  |  | **\~$0.65 (range $0.30 to $1.20)** |
+| Review loop | Gemini 3 Flash, no cache discount assumed | \~250K in across calls, \~25K out | \~$0.20 |
+| **Total** |  |  | **\~$0.31 (range $0.15 to $0.60)** |
 
-**Monthly run cost, prod environment**
+Using Gemini 3.1 Pro for review, as the design first did, was about $0.53 for that step ($0.65 a run), and Pro was still a preview release. It stays an option if evals show Flash is not good enough.
+
+**Monthly run cost, dev environment**
 
 | Component | Basis | $/month |
 | --- | --- | --- |
-| Gemini tokens | 200 runs x \~$0.65 | 60 to 240 |
-| Cloud Run service | 1 warm min instance, 1 vCPU / 2 GiB at idle rates (\~$19); active time mostly in free tier; IAP on Cloud Run has no added charge | 20 to 25 |
-| Validator job | \~600 executions x \~2 min, 2 vCPU / 4 GiB | 3 to 5 |
-| Model Armor | Screening on all prompts and responses | Verify; budget 0 to 20 |
-| Logging, Monitoring, Trace | Mostly inside free allotments | 0 to 10 |
-| KMS, Secret Manager, Firestore, GCS, Artifact Registry, BigQuery | Small volumes | 3 to 8 |
-| **Prod total** |  | **\~90 to 310** |
+| Gemini tokens | 50 runs x \~$0.31 | 8 to 30 |
+| Cloud Run service | Min instances 0, max 1, 1 vCPU / 512 MiB, billed per request; inside the monthly free tier (verify); IAP on Cloud Run has no added charge | 0 to 2 |
+| Validator job | \~150 executions x \~2 min, 2 vCPU / 4 GiB, about 36,000 vCPU-seconds | 0 to 1 |
+| Model Armor | Optional in `dev`; enable only if its price at this volume is a few dollars at most (verify; ADR-026) | 0 to 5 |
+| Logging, Monitoring, Trace | Inside free allotments; log exclusions for debug noise | 0 to 2 |
+| KMS (about 5 keys at $0.06 per key version), Secret Manager, Firestore, GCS, Artifact Registry, BigQuery | Free tiers; 30-day lifecycle on artifacts; Artifact Registry keeps the last 5 images | 1 to 4 |
+| **Dev total** |  | **\~10 to 45** |
 
 **Monthly totals by scenario**
 
 | Scenario | $/month |
 | --- | --- |
-| Dev only (min instances 0, \~50 runs) | 20 to 60 |
-| Dev plus prod (table above) | 110 to 370 |
-| Eval spend during active development (weekly full suite plus PR smoke tests) | +300 to 600 |
+| Runs only (table above) | 10 to 45 |
+| Plus model-backed evals under a spend cap (see below) | 15 to 70 |
 | Local hosts (Codex, Gemini CLI, Grok Build, DeepSeek) | $0 on our bill; tokens charged to each user's own plan or API key |
 
-The earlier hardening line (HTTPS load balancer for IAP, Cloud NAT for validator egress) is gone: IAP now runs directly on Cloud Run, and the validator needs no egress.
+Deterministic checks (render hashes, schema validation, `lzctl check`, the unit tests) call no model and cost nothing, so they run on every pull request. Only model-backed evals spend tokens.
 
-**Eval cost gotcha:** a full suite is 25 scenarios x 4 clouds = 100 runs, about $65. Run it nightly and it costs about $2,000 a month. Run an 8-scenario smoke subset on PRs and the full suite weekly and at release.
+**Eval cost:** one GCP scenario is a run, about $0.31, so the 25-scenario GCP golden set is about $8 and the full set across four clouds (25 x 4 = 100 runs) is about $31. Run nightly, that is about $930 a month, so do not. Model-backed evals run on demand and before a release, with a budget alert and a hard cap on the eval project, which puts them at about $5 to $25 a month. The earlier plan (weekly full suite plus a smoke subset on every pull request, $300 to $600 a month while building) is dropped.
+
+**Where the savings come from** (against the earlier $410 to $990 a month all-in): no `prod` environment (about $90 to $330), no always-on instance (about $19), Flash instead of Pro for review (about $0.22 a run), and on-demand rather than scheduled model evals. What is left is mostly tokens.
 
 **One-time build cost**
 
@@ -496,6 +552,7 @@ Estimated at a $120/hour fully loaded rate ($4,800 per engineer-week); scale lin
 | Core: spec schema, `lzctl`, validator image, eval harness | 4 to 5 | $19K to $24K |
 | GCP baseline: templates, policies, evals | 2 to 3 | $10K to $14K |
 | Hosted agent: ADK on Cloud Run, infra, CI/CD, PR flow | 3 to 4 | $14K to $19K |
+| Observability: metrics, Grafana, dashboards, alerts (deferred, ADR-025; not in the total) | 1 | $5K |
 | Azure baseline (AVM ALZ) | 2 to 3 | $10K to $14K |
 | AWS baseline (Control Tower, AFT, SCPs) | 3 to 4 | $14K to $19K |
 | OpenStack module set (built and owned by us) | 4 to 6 | $19K to $29K |
@@ -518,10 +575,13 @@ The largest risk is false confidence: a PR that passes static checks but fails a
 | OpenStack deployments differ (missing Octavia, Barbican, Designate) | High | Capability discovery in `lzctl doctor`; reject unsupported spec fields up front |
 | Low adoption because platform engineers distrust generated config | High | Decision log, deterministic rendering and small diffs make review fast; pilot with one team per cloud |
 | Upstream baseline drift (FAST major releases rename modules and change `factories_config`; provider majors such as AzureRM 5.0) | Medium | Pin by tag per cloud; schema regenerated and evals rerun on every bump |
-| Review model is a preview release (Gemini 3.1 Pro) | Medium | Pin the version; keep a GA model (such as Gemini 3.5 Flash, if GA in our region) as an evaluated fallback; re-run evals before any model switch |
+| Flash-only review is weaker than a Pro model on conflicting requirements | Medium | Measure it against the golden set before G2; escalate review to a Pro model only if evals show a gap (ADR-026); pin the model version and re-run evals before any switch |
+| Scale to zero makes the first request after idle slow | Low | Startup CPU boost; sessions in Firestore so nothing is lost; set expectations in the interface |
 | AWS landing zone is only partly Terraform-native (Control Tower, AFT) | Medium | Generate AFT requests and SCPs only; leave Control Tower enablement to a one-time, documented step |
 | Host behavior drift (new Codex, Gemini CLI, Grok Build releases; skill paths have already moved once) | Medium | Host x model eval matrix; pin skill compatibility notes per host version |
-| Eval token spend runs away | Medium | PR smoke subset, weekly full suite, budget alert on the eval project |
+| Eval token spend runs away | Medium | Model-backed evals on demand only, a budget alert and a hard cap on the eval project; deterministic checks in CI cost nothing |
+| Metric labels leak requirements or explode in cardinality (when metrics are built) | Medium | Fixed label allowlist enforced by a test; run IDs only on traces and logs; samples are billed, so a budget alert on Monitoring spend |
+| Grafana becomes another service to secure and patch (when it is built) | Medium | IAP only, viewer-only identity, no anonymous access, stateless, image pinned by digest and rebuilt by Dependabot-driven PRs; Cloud Monitoring dashboards remain the fallback |
 | Hallucinated module inputs | Medium | Schema generated from upstream schemas and module variables; validation before and after render |
 | Prompt injection through pasted requirements | Medium | Model Armor in the hosted agent; typed `lzctl` arguments; workflow-enforced gates; no write credentials in reach |
 | Product and API renames (Vertex AI to Gemini Enterprise Agent Platform; Agent Engine to Agent Runtime) | Low | Verify current names at build time; isolate model calls behind one client module |
@@ -542,6 +602,9 @@ The GCP baseline choice blocks P0 and should be decided first; the rest can be s
 - [ ] **Target repo model:** one PR to a shared foundation repo, or a new repo per landing zone?
 - [ ] **Sandbox environments for P3:** a test org, tenant, AWS organization and OpenStack project, who funds them, and what they cost?
 - [ ] **Compliance:** which SOC 2 and PCI controls does this system own versus inherit?
+- [ ] **Grafana access:** who may open Grafana (the platform team only, or pilot teams too), and may it show per-team run counts?
+- [ ] **Prometheus and Grafana for generated landing zones:** should a spec block ever emit them for the customer's own workloads? Out of scope for the MVP.
+- [ ] **Grafana single sign-on and data source:** confirm the IAP-header and Managed Service for Prometheus authentication paths in a spike before building.
 
 ## Sources
 
@@ -565,4 +628,6 @@ The GCP baseline choice blocks P0 and should be decided first; the rest can be s
 - [Gemini API pricing (BenchLM, July 2026)](https://benchlm.ai/google/api-pricing) and [Gemini 3.1 Pro on Vertex AI (LLM Reference)](https://www.llmreference.com/model/gemini-3.1-pro-preview/gcp-vertex-ai): Gemini 3.1 Pro and Gemini 3 Flash rates, preview status.
 - [Gemini 3.1 Pro pricing calculator](https://trevorfox.com/tools/calculators/llm-cost/google-gemini/gemini-3.1-pro/): cached input rate.
 - [Cloud Run pricing (Google Cloud)](https://cloud.google.com/run/pricing): free tier and billing modes.
+- [Cloud Run now supports Managed Service for Prometheus (Google Cloud blog)](https://cloud.google.com/blog/products/management-tools/cloud-run-now-supports-managed-service-for-prometheus): Prometheus sidecar for scraped metrics, OpenTelemetry sidecar for OTLP.
+- [Managed Service for Prometheus](https://cloud.google.com/managed-prometheus) and [Query using Grafana](https://docs.cloud.google.com/stackdriver/docs/managed-prometheus/query): ingestion pricing ($0.06 per million samples, first tier), Grafana data source and the legacy frontend proxy.
 - [Cloud Run Functions pricing (nOps)](https://www.nops.io/blog/cloud-run-functions-pricing/): Tier 1 active and idle min-instance rates.

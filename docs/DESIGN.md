@@ -368,7 +368,7 @@ docs/                 # design, ADRs, CI/CD strategy, runbooks
 .github/              # workflows, issue forms, PR template, CODEOWNERS, Dependabot
 ```
 
-Built so far: `docs/`, `.github/` and the community files (LICENSE, CONTRIBUTING, SECURITY, SUPPORT, CODE_OF_CONDUCT). The other directories arrive with P0 and P1.
+Built so far: `docs/`, `.github/` and the community files (LICENSE, CONTRIBUTING, SECURITY, SUPPORT, CODE_OF_CONDUCT), plus the first P0 slice: the skill package with the core and GCP spec schemas, `lzctl spec validate` and `lzctl doctor`, the `.gemini/skills` symlink, golden GCP specs in `evals/` and tests in `tests/`. `lzctl render`, `check` and `explain`, the templates, policies, `agent/`, `validator/` and `infra/` come next, with P0 and P1.
 
 **Pipeline** (full strategy, environments and naming in [CICD.md](CICD.md))
 

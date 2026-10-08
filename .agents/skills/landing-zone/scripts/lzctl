@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+"""lzctl: deterministic landing zone tooling shared by every agent host.
+
+Commands:
+  spec validate <spec.json>   Check a spec against the core and per-cloud schemas.
+  doctor                      Check runtime dependencies.
+
+Exit codes: 0 clean, 1 findings, 2 usage or environment error.
+Requires Python 3.11+ and the jsonschema package.
+"""
+
+from __future__ import annotations
+
+import argparse
+import ipaddress
+import json
+import shutil
+import sys
+from pathlib import Path
+
+SKILL_DIR = Path(__file__).resolve().parent.parent
+SCHEMA_DIR = SKILL_DIR / "schemas"
+
+EXIT_OK, EXIT_FINDINGS, EXIT_ERROR = 0, 1, 2
+
+TOOLS = {
+    "terraform": "fmt and validate (OpenTofu also works)",
+    "tflint": "lint",
+    "trivy": "security scan",
+    "conftest": "policy checks",
+}
+
+
+def _fail(message: str) -> int:
+    print(f"lzctl: {message}", file=sys.stderr)
+    return EXIT_ERROR
+
+
+def _load_json(path: Path) -> object:
+    with path.open(encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _dotted(path) -> str:
+    return ".".join(str(part) for part in path) or "(root)"
+
+
+def _finding(rule: str, path: str, message: str) -> dict:
+    return {"rule": rule, "path": path, "message": message}
+
+
+def _schema_findings(validator_cls, schema: dict, instance: object, prefix: tuple = ()) -> list[dict]:
+    findings = []
+    for error in validator_cls(schema).iter_errors(instance):
+        path = _dotted(prefix + tuple(error.absolute_path))
+        if error.validator == "not" and path.endswith("extensions"):
+            message = "extensions may only contain the block for target.cloud"
+        elif error.validator == "required":
+            message = error.message
+        else:
+            message = error.message if len(error.message) <= 160 else error.message[:157] + "..."
+        findings.append(_finding(f"schema.{error.validator}", path, message))
+    return findings
+
+
+def _semantic_findings(spec: dict) -> list[dict]:
+    """Checks JSON Schema can't express."""
+    findings = []
+    cidr = spec.get("network", {}).get("cidr_supernet")
+    if isinstance(cidr, str):
+        try:
+            net = ipaddress.ip_network(cidr, strict=True)
+        except ValueError as exc:
+            findings.append(_finding("semantic.cidr", "network.cidr_supernet", str(exc)))
+        else:
+            if net.version != 4 or not net.is_private:
+                findings.append(_finding("semantic.cidr", "network.cidr_supernet", f"{cidr} is not a private IPv4 range"))
+            elif net.prefixlen > 16:
+                findings.append(_finding("semantic.cidr", "network.cidr_supernet", f"{cidr} is too small for a supernet; use /16 or larger"))
+    return findings
+
+
+def validate_spec(spec: object) -> list[dict]:
+    try:
+        from jsonschema import Draft202012Validator
+    except ImportError as exc:
+        raise RuntimeError("jsonschema is not installed; run `lzctl doctor`") from exc
+
+    core = _load_json(SCHEMA_DIR / "lz-spec.core.schema.json")
+    findings = _schema_findings(Draft202012Validator, core, spec)
+    if not isinstance(spec, dict):
+        return findings
+
+    findings += _semantic_findings(spec)
+
+    cloud = spec.get("target", {}).get("cloud") if isinstance(spec.get("target"), dict) else None
+    extension = spec.get("extensions", {}).get(cloud) if isinstance(spec.get("extensions"), dict) else None
+    if cloud and extension is not None:
+        schema_path = SCHEMA_DIR / f"lz-spec.{cloud}.schema.json"
+        if schema_path.exists():
+            findings += _schema_findings(
+                Draft202012Validator, _load_json(schema_path), extension, prefix=("extensions", cloud)
+            )
+        else:
+            findings.append(
+                _finding("semantic.cloud_unsupported", f"extensions.{cloud}", f"no extension schema for {cloud} yet")
+            )
+
+    return sorted(findings, key=lambda f: (f["path"], f["rule"], f["message"]))
+
+
+def cmd_spec_validate(args: argparse.Namespace) -> int:
+    path = Path(args.spec)
+    try:
+        spec = _load_json(path)
+    except FileNotFoundError:
+        return _fail(f"{path} not found")
+    except json.JSONDecodeError as exc:
+        return _fail(f"{path} is not valid JSON: {exc}")
+
+    try:
+        findings = validate_spec(spec)
+    except RuntimeError as exc:
+        return _fail(str(exc))
+
+    if args.format == "json":
+        print(json.dumps({"valid": not findings, "findings": findings}, indent=2, sort_keys=True))
+    elif findings:
+        for f in findings:
+            print(f"{f['path']}: {f['message']} [{f['rule']}]")
+    else:
+        print("spec is valid")
+    return EXIT_FINDINGS if findings else EXIT_OK
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    checks = []
+    py_ok = sys.version_info >= (3, 11)
+    checks.append({"name": "python>=3.11", "ok": py_ok, "required": True, "detail": sys.version.split()[0]})
+    try:
+        import jsonschema
+
+        checks.append({"name": "jsonschema", "ok": True, "required": True, "detail": jsonschema.__version__})
+    except ImportError:
+        checks.append({"name": "jsonschema", "ok": False, "required": True, "detail": "pip install jsonschema"})
+    for tool, purpose in TOOLS.items():
+        found = shutil.which(tool)
+        checks.append({"name": tool, "ok": bool(found), "required": False, "detail": found or f"missing ({purpose})"})
+
+    ok = all(c["ok"] for c in checks if c["required"])
+    if args.format == "json":
+        print(json.dumps({"ok": ok, "checks": checks}, indent=2))
+    else:
+        for c in checks:
+            mark = "ok " if c["ok"] else ("MISSING" if c["required"] else "optional-missing")
+            print(f"{mark:16} {c['name']}: {c['detail']}")
+    return EXIT_OK if ok else EXIT_FINDINGS
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="lzctl", description=__doc__.split("\n\n")[0])
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    spec = sub.add_parser("spec", help="spec commands").add_subparsers(dest="spec_command", required=True)
+    validate = spec.add_parser("validate", help="validate a spec file")
+    validate.add_argument("spec", help="path to the spec JSON file")
+    validate.add_argument("--format", choices=["json", "text"], default="json")
+    validate.set_defaults(func=cmd_spec_validate)
+
+    doctor = sub.add_parser("doctor", help="check runtime dependencies")
+    doctor.add_argument("--format", choices=["json", "text"], default="json")
+    doctor.set_defaults(func=cmd_doctor)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

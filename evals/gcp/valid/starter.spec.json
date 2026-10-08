@@ -1,0 +1,16 @@
+{
+  "spec_version": "2.0",
+  "target": { "cloud": "gcp", "profile": "starter", "baseline_version": "v59.0.0" },
+  "organization": { "id": "123456789012", "billing_ref": "000000-000000-000000", "domain": "example.com" },
+  "hierarchy": { "environments": ["dev"] },
+  "network": { "topology": "single", "regions": ["us-central1"], "cidr_supernet": "10.0.0.0/16" },
+  "security": { "service_perimeter": false, "customer_managed_keys": false },
+  "logging": { "audit_destination": "archive", "retention_days": 90 },
+  "iam": {
+    "groups": {
+      "org_admins": "gcp-org-admins@example.com",
+      "network_admins": "gcp-network-admins@example.com",
+      "security_admins": "gcp-security-admins@example.com"
+    }
+  }
+}

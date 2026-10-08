@@ -1,0 +1,21 @@
+{
+  "spec_version": "2.0",
+  "target": { "cloud": "gcp", "profile": "standard", "baseline_version": "v59.0.0" },
+  "organization": { "id": "123456789012", "billing_ref": "000000-000000-000000", "domain": "example.com" },
+  "hierarchy": { "environments": ["dev", "stage", "prod"], "business_units": ["payments", "platform"] },
+  "network": { "topology": "hub_spoke", "regions": ["us-central1", "us-east1"], "cidr_supernet": "10.0.0.0/8", "private_service_access": true },
+  "security": { "service_perimeter": false, "customer_managed_keys": false, "compliance": ["soc2"] },
+  "logging": { "audit_destination": "both", "retention_days": 365 },
+  "iam": {
+    "groups": {
+      "org_admins": "gcp-org-admins@example.com",
+      "network_admins": "gcp-network-admins@example.com",
+      "security_admins": "gcp-security-admins@example.com"
+    }
+  },
+  "extensions": { "gcp": { "hub_connectivity": "peering", "audit_sink": "both" } },
+  "decisions": [
+    { "field": "network.topology", "value": "hub_spoke", "rationale": "Default for the standard profile", "source": "default" },
+    { "field": "network.regions", "value": ["us-central1", "us-east1"], "rationale": "Primary and DR region requested by the user", "source": "user" }
+  ]
+}

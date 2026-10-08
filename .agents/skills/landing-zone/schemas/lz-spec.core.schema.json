@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/loriamichaelj/terraform-landing-zone-template-skill/schemas/lz-spec.core.schema.json",
+  "title": "Landing zone spec (core)",
+  "description": "Cloud-agnostic landing zone spec. Settings with no cross-cloud equivalent live under extensions.<cloud>; only the block matching target.cloud is allowed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["spec_version", "target", "organization", "hierarchy", "network", "security", "logging", "iam"],
+  "properties": {
+    "spec_version": { "const": "2.0" },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cloud", "profile", "baseline_version"],
+      "properties": {
+        "cloud": { "enum": ["gcp", "azure", "aws", "openstack"] },
+        "profile": { "enum": ["starter", "standard", "regulated"] },
+        "baseline_version": { "type": "string", "minLength": 1 }
+      }
+    },
+    "organization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "billing_ref", "domain"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "billing_ref": { "type": "string", "minLength": 1 },
+        "domain": { "type": "string", "pattern": "^([a-z0-9]([a-z0-9-]*[a-z0-9])?\\.)+[a-z]{2,}$" }
+      }
+    },
+    "hierarchy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["environments"],
+      "properties": {
+        "environments": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": { "enum": ["dev", "stage", "prod"] }
+        },
+        "business_units": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,28}[a-z0-9]$" }
+        }
+      }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["topology", "regions", "cidr_supernet"],
+      "properties": {
+        "topology": { "enum": ["single", "hub_spoke"] },
+        "regions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z]+(-[a-z0-9]+)+$" }
+        },
+        "cidr_supernet": { "type": "string", "pattern": "^\\d{1,3}(\\.\\d{1,3}){3}/\\d{1,2}$" },
+        "private_service_access": { "type": "boolean" }
+      }
+    },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["service_perimeter", "customer_managed_keys"],
+      "properties": {
+        "service_perimeter": { "type": "boolean" },
+        "customer_managed_keys": { "type": "boolean" },
+        "compliance": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["soc2", "pci", "hipaa"] }
+        }
+      }
+    },
+    "logging": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["audit_destination", "retention_days"],
+      "properties": {
+        "audit_destination": { "enum": ["analytics", "archive", "both"] },
+        "retention_days": { "type": "integer", "minimum": 30, "maximum": 3650 }
+      }
+    },
+    "iam": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["groups"],
+      "properties": {
+        "groups": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["org_admins", "network_admins", "security_admins"],
+          "properties": {
+            "org_admins": { "$ref": "#/$defs/email" },
+            "network_admins": { "$ref": "#/$defs/email" },
+            "security_admins": { "$ref": "#/$defs/email" }
+          }
+        }
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "gcp": { "type": "object" },
+        "azure": { "type": "object" },
+        "aws": { "type": "object" },
+        "openstack": { "type": "object" }
+      }
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field", "value", "rationale", "source"],
+        "properties": {
+          "field": { "type": "string", "minLength": 1 },
+          "value": {},
+          "rationale": { "type": "string", "minLength": 1 },
+          "source": { "enum": ["user", "default"] }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "email": { "type": "string", "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$" }
+  },
+  "allOf": [
+    {
+      "$comment": "Only the extensions block for the target cloud is allowed.",
+      "if": { "properties": { "target": { "properties": { "cloud": { "const": "gcp" } } } } },
+      "then": { "properties": { "extensions": { "not": { "anyOf": [{ "required": ["azure"] }, { "required": ["aws"] }, { "required": ["openstack"] }] } } } }
+    },
+    {
+      "if": { "properties": { "target": { "properties": { "cloud": { "const": "azure" } } } } },
+      "then": { "properties": { "extensions": { "not": { "anyOf": [{ "required": ["gcp"] }, { "required": ["aws"] }, { "required": ["openstack"] }] } } } }
+    },
+    {
+      "if": { "properties": { "target": { "properties": { "cloud": { "const": "aws" } } } } },
+      "then": { "properties": { "extensions": { "not": { "anyOf": [{ "required": ["gcp"] }, { "required": ["azure"] }, { "required": ["openstack"] }] } } } }
+    },
+    {
+      "if": { "properties": { "target": { "properties": { "cloud": { "const": "openstack" } } } } },
+      "then": { "properties": { "extensions": { "not": { "anyOf": [{ "required": ["gcp"] }, { "required": ["azure"] }, { "required": ["aws"] }] } } } }
+    },
+    {
+      "$comment": "Starter is a single environment.",
+      "if": { "properties": { "target": { "properties": { "profile": { "const": "starter" } } } } },
+      "then": { "properties": { "hierarchy": { "properties": { "environments": { "maxItems": 1 } } } } }
+    },
+    {
+      "$comment": "Standard keeps audit logs at least one year.",
+      "if": { "properties": { "target": { "properties": { "profile": { "const": "standard" } } } } },
+      "then": { "properties": { "logging": { "properties": { "retention_days": { "minimum": 365 } } } } }
+    },
+    {
+      "$comment": "Regulated adds customer-managed keys and longer retention.",
+      "if": { "properties": { "target": { "properties": { "profile": { "const": "regulated" } } } } },
+      "then": {
+        "properties": {
+          "security": { "properties": { "customer_managed_keys": { "const": true } } },
+          "logging": { "properties": { "retention_days": { "minimum": 400 } } }
+        }
+      }
+    },
+    {
+      "$comment": "Hub-and-spoke needs more than one environment to be worth having.",
+      "if": { "properties": { "network": { "properties": { "topology": { "const": "hub_spoke" } } } } },
+      "then": { "properties": { "hierarchy": { "properties": { "environments": { "minItems": 2 } } } } }
+    },
+    {
+      "$comment": "Service perimeters exist only on GCP (VPC-SC); other clouds use their own guardrails.",
+      "if": { "properties": { "target": { "properties": { "cloud": { "enum": ["azure", "aws", "openstack"] } } } } },
+      "then": { "properties": { "security": { "properties": { "service_perimeter": { "const": false } } } } }
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "spec_version": "2.0",
+  "target": { "cloud": "gcp", "profile": "regulated", "baseline_version": "v59.0.0" },
+  "organization": { "id": "123456789012", "billing_ref": "000000-000000-000000", "domain": "example.com" },
+  "hierarchy": { "environments": ["dev", "stage", "prod"], "business_units": ["payments"] },
+  "network": { "topology": "hub_spoke", "regions": ["us-central1", "us-east1"], "cidr_supernet": "10.0.0.0/8", "private_service_access": true },
+  "security": { "service_perimeter": true, "customer_managed_keys": true, "compliance": ["soc2", "pci"] },
+  "logging": { "audit_destination": "both", "retention_days": 400 },
+  "iam": {
+    "groups": {
+      "org_admins": "gcp-org-admins@example.com",
+      "network_admins": "gcp-network-admins@example.com",
+      "security_admins": "gcp-security-admins@example.com"
+    }
+  },
+  "extensions": { "gcp": { "hub_connectivity": "ncc", "audit_sink": "bigquery" } },
+  "decisions": [
+    { "field": "security.service_perimeter", "value": true, "rationale": "PCI scope requires a VPC-SC perimeter", "source": "user" }
+  ]
+}

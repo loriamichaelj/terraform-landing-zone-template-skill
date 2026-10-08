@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/loriamichaelj/terraform-landing-zone-template-skill/schemas/lz-spec.gcp.schema.json",
+  "title": "Landing zone spec: GCP extensions",
+  "description": "Validates extensions.gcp. Applied by lzctl when target.cloud is gcp.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "hub_connectivity": { "enum": ["peering", "ncc", "nva", "vpn"] },
+    "audit_sink": { "enum": ["bigquery", "gcs", "both"] }
+  }
+}

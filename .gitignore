@@ -30,3 +30,8 @@ terraform.rc
 .DS_Store
 .idea/
 .vscode/
+
+# Python
+__pycache__/
+.pytest_cache/
+.venv/

@@ -35,6 +35,15 @@ jobs:
       contents: read
       id-token: write
     steps:
+      - name: Show the OIDC token's identity claims
+        # Prints only non-secret claims; the token itself is never echoed.
+        run: |
+          token="$(curl -sSf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=oidc-check" | jq -r .value)"
+          payload="$(cut -d. -f2 <<<"${token}" | tr '_-' '/+')"
+          while [ $(( ${#payload} % 4 )) -ne 0 ]; do payload="${payload}="; done
+          base64 -d <<<"${payload}" | jq '{sub, environment, repository, repository_id, repository_owner_id, ref}'
+
       - name: Authenticate to GCP
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:

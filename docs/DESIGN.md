@@ -14,7 +14,7 @@ Domain knowledge (module catalog, naming standards, policy rules) ships as a por
 | Author | M.L. |
 | Reviewers | Platform engineering, Cloud security, SRE (names TBD) |
 | Target platform | Hosted agent on Google Cloud (Cloud Run, ADK 2.0, Gemini Enterprise Agent Platform); skill also runs locally in Codex, Gemini CLI, Grok Build and DeepSeek-backed hosts |
-| MVP scope | GCP first, then Azure, AWS and OpenStack; Starter, Standard and Regulated profiles; PR output, validate-only (no plan, no apply) |
+| MVP scope | A local skill for GCP (Starter and Standard), ending at gate G1; the hosted agent, PR flow and Regulated profile follow, then Azure, AWS and OpenStack (ADR-027). Validate-only: no plan, no apply |
 
 ## Background and problem statement
 
@@ -31,7 +31,7 @@ LLMs are good at intake and mapping intent to options, and bad at producing revi
 
 ## Goals and non-goals
 
-The MVP succeeds when a platform engineer can go from a requirements conversation to a review-ready landing zone PR in under one hour, with zero critical policy violations.
+The product succeeds when a platform engineer can go from a requirements conversation to a review-ready landing zone PR in under one hour, with zero critical policy violations. The MVP (ADR-027) tests the first half of that on a local host: a conversation to a rendered, checked output directory with a README, validation report and decision log, in under an hour. The engineer opens the PR; the hosted agent that opens it comes next.
 
 **Goals**
 
@@ -491,12 +491,33 @@ The chosen design trades some flexibility for reviewability and auditability, wh
 
 ## Delivery plan and milestones
 
-The GCP-first MVP (P0 and P1) is 9 to 12 engineer-weeks; all four clouds and four hosts take 21 to 29 engineer-weeks in total, or one more if the deferred observability is built (see Cost estimate).
+The MVP is P0 plus a release, ending at G1 (ADR-027). The hosted agent (P1) is the next release. The GCP-first pair (P0 and P1) is 9 to 12 engineer-weeks; all four clouds and four hosts take 21 to 29 engineer-weeks in total, or one more if the deferred observability is built (see Cost estimate). The part of P0 still to build for the MVP has not been re-estimated.
+
+**MVP scope (ADR-027)**
+
+| In | Out (later) |
+| --- | --- |
+| GCP; Standard profile as the gate, Starter as far as it renders | Regulated profile, `1-vpcsc`, `2-security`, `hardened` dataset |
+| `0-org-setup` and `2-networking` (hub-and-spoke over peering), already rendered | `ncc`, `nva`, `vpn`, and Starter's `single` network unless rendered |
+| `lzctl` spec validate, render, check, explain, doctor, run locally | Hosted agent, validator job, `infra/`, Firestore, BigQuery audit, Model Armor, the spend meter |
+| conftest policy pack and tflint config, so `check` has no `not_applicable` on the golden renders | GitHub App and the PR flow (F7, F8); the user opens the PR |
+| README, validation report and decision log in the output directory | Azure, AWS, OpenStack, and hosts beyond the first two |
+| Two delivery paths: use the skill from the repository, or upload the `skill-v*` release `.zip` (with SHA-256) to an AI platform; install notes per host | Prometheus and Grafana (ADR-025) |
+| One certified host (proposed: Gemini CLI), on-demand intake eval | Scheduled model evals |
+
+**Exit criteria for G1**
+
+1. The Starter and Standard golden specs render byte-identically on Python 3.11 and 3.13.
+2. `lzctl check` reports no critical findings and no `not_applicable` for validate, tflint and conftest on the Standard golden render.
+3. One person who did not build it takes a real requirements conversation to a rendered, checked output directory in under an hour on the certified host.
+4. The checked-out repository works as a skill in the certified host, and the release `.zip` extracts on a clean machine with `scripts/lzctl` still executable and `lzctl doctor` passing. The same tag rebuilds to the same checksum.
+
+The MVP adds no cloud resources and no cost to this project, and tokens are charged to each user's own plan. It has no audit log and no governed path; those arrive with P1.
 
 | Phase | Scope | Engineer-weeks | Exit gate |
 | --- | --- | --- | --- |
-| P0: Core and GCP | Spec schema, `lzctl`, validator image, eval harness, GCP baseline (FAST datasets, policies, evals) | 6 to 8 | **G1:** GCP golden set passes with zero critical findings; render is byte-identical across two hosts |
-| P1: Hosted agent | ADK 2.0 workflow on Cloud Run, agent infra, CI/CD, PR flow, run records, GCP pilot with one team | 3 to 4 | **G2:** pilot team opens a PR from a real requirements session; p95 latency and cost per run are read from the run records |
+| P0: Core and GCP (the MVP, ADR-027) | Spec schema, `lzctl`, eval harness, GCP baseline (FAST datasets, policies, evals), release `.zip`. The validator image moves to P1 with the hosted agent | 6 to 8 | **G1:** GCP golden set passes with zero critical findings; render is byte-identical across two hosts; a first user completes a run on the certified host (criteria above) |
+| P1: Hosted agent (MVP 2) | ADK 2.0 workflow on Cloud Run, validator image and job, agent infra, CI/CD, PR flow, run records, GCP pilot with one team | 3 to 4 | **G2:** pilot team opens a PR from a real requirements session; p95 latency and cost per run are read from the run records |
 | P2: Azure, AWS, hosts | AVM ALZ baseline, Control Tower/AFT/SCP baseline, host compatibility testing | 6 to 9 | **G3:** Azure and AWS golden sets pass; host x model eval matrix green for approved hosts |
 | P3: OpenStack and hardening | OpenStack module set, sandbox plan per cloud, security review, documentation, broader rollout | 6 to 8 | None (steady state) |
 
@@ -561,7 +582,7 @@ Estimated at a $120/hour fully loaded rate ($4,800 per engineer-week); scale lin
 | Security review, documentation, pilot | 2 | $10K |
 | **Total** | **21 to 29** | **\~$100K to $140K** |
 
-A GCP-first MVP (core, GCP, hosted agent) is 9 to 12 engineer-weeks, about $43K to $58K. Not yet costed: sandbox orgs and tenants for the P3 plan step (see Open questions).
+A GCP-first build through the hosted agent (core, GCP, hosted agent; P0 plus P1) is 9 to 12 engineer-weeks, about $43K to $58K. The MVP (ADR-027) is the P0 part of that. Not yet costed: sandbox orgs and tenants for the P3 plan step (see Open questions).
 
 **Ongoing maintenance** is roughly 0.25 to 0.5 FTE ($60K to $125K a year): baseline and provider upgrades across four clouds, eval upkeep, and host changes. It is more than ten times the annual cloud run cost, so budget headcount before infrastructure.
 
@@ -590,7 +611,7 @@ The largest risk is false confidence: a PR that passes static checks but fails a
 
 ## Open questions and decisions needed
 
-The GCP baseline choice blocks P0 and should be decided first; the rest can be settled during P1.
+The GCP baseline choice blocks P0 and should be decided first. The MVP questions below (host, profiles, Starter's network, target repo model) should be settled before G1; the rest can be settled during P1.
 
 - [ ] **GCP baseline:** Fabric FAST (YAML datasets map directly onto our profiles and ship JSON schemas; recommended) or `terraform-example-foundation` (closer to Google's official reference)?
 - [ ] **AWS approach:** Control Tower plus AFT (recommended), or Organizations and SCPs only for teams without Control Tower?
@@ -601,7 +622,10 @@ The GCP baseline choice blocks P0 and should be decided first; the rest can be s
 - [ ] **Regulated profile on GCP:** is SCC Premium or Enterprise available? The FAST `hardened` dataset's detective controls depend on it.
 - [ ] **Loaded rate:** confirm the $120/hour assumption used in the build estimate.
 - [ ] **Interface for the hosted agent:** CLI, Slack, or Gemini Enterprise?
-- [ ] **Target repo model:** one PR to a shared foundation repo, or a new repo per landing zone?
+- [ ] **MVP host:** certify Gemini CLI first (proposed in ADR-027) and Codex second, or start elsewhere?
+- [ ] **MVP profiles:** is Standard plus as much of Starter as renders enough for the first user, or does the first user need Regulated?
+- [ ] **Starter's network:** render the `single` topology before G1, or ship Starter with the network listed in `not_rendered_yet`?
+- [ ] **Target repo model:** one PR to a shared foundation repo, or a new repo per landing zone? It shapes the output layout and the README even for the local MVP.
 - [ ] **Sandbox environments for P3:** a test org, tenant, AWS organization and OpenStack project, who funds them, and what they cost?
 - [ ] **Compliance:** which SOC 2 and PCI controls does this system own versus inherit?
 - [ ] **Grafana access:** who may open Grafana (the platform team only, or pilot teams too), and may it show per-team run counts?

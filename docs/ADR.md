@@ -34,6 +34,7 @@ Statuses: **Proposed** (in the design, awaiting reviewer sign-off) · **Accepted
 | [024](#adr-024-the-2-networking-stage-is-rendered-from-the-peering-dataset-with-a-fixed-cidr-plan) | The 2-networking stage is rendered from the peering dataset with a fixed CIDR plan | Accepted | 2026-10-08 |
 | [025](#adr-025-prometheus-metrics-and-grafana-dashboards-for-the-agent-platform) | Prometheus metrics and Grafana dashboards for the agent platform | Proposed | 2026-10-08 |
 | [026](#adr-026-this-platform-is-deployed-in-dev-only-and-defaults-are-chosen-for-minimum-cost) | This platform is deployed in dev only, and defaults are chosen for minimum cost | Proposed | 2026-10-08 |
+| [027](#adr-027-the-mvp-is-a-local-gcp-skill-that-ends-at-gate-g1) | The MVP is a local GCP skill that ends at gate G1 | Proposed | 2026-10-08 |
 
 ---
 
@@ -467,6 +468,52 @@ A ruleset was used rather than classic branch protection: rulesets are GitHub's 
 
 ---
 
+## ADR-027: The MVP is a local GCP skill that ends at gate G1
+
+**Status:** Proposed · 2026-10-08 · Requested by the project owner · Redefines the MVP in DESIGN.md (P0 plus P1, ending at G2); supersedes no ADR, and the hosted agent in ADR-003, ADR-005, ADR-008, ADR-009 and ADR-026 is unchanged, only later
+
+**Context.** DESIGN.md defined the MVP as P0 plus P1: 9 to 12 engineer-weeks, ending at gate G2 (a pilot team opens a PR through the hosted agent). That makes the whole hosted platform a precondition for anyone trying the product: Cloud Run, Firestore, KMS, BigQuery, the validator job, IAP, the GitHub App and the spend meter, all under a $20 a month cap (ADR-026) and none of it built. The part that earns trust is the deterministic core (spec, render, check), and most of it exists. It can be put in front of a real user, on a host they already use, without any of the hosted platform. The skill already ships by copying one folder (ADR-010), and a user's own host pays for the tokens.
+
+**Decision.**
+- **The MVP is P0 plus a release, ending at G1.** The hosted agent (P1) is the next release (MVP 2), not part of the first.
+- **Scope.** GCP only. The Standard profile is the one the gate is measured on; Starter is included as far as it renders. Intake, render and check run in a local host, through `lzctl`. Output is a rendered directory with a README, a validation report and a decision log, produced by `lzctl` from the spec and the render report. The user opens the pull request themselves.
+- **Rendered today:** `0-org-setup` and the `2-networking` hub-and-spoke stage over peering (ADR-020, ADR-024).
+- **To build:** a conftest policy pack and a tflint configuration, so `lzctl check` has no `not_applicable` left for validate, tflint and conftest on the golden renders (ADR-021); the README, validation report and decision log in the output directory; `release-skill.yml` and per-host install instructions; and an on-demand intake eval on the certified host.
+- **Delivery: two paths, one skill.**
+  1. **From the repository.** A coding agent that runs on the user's machine (Codex, Gemini CLI, Grok Build) uses the skill straight from a checkout: `.agents/skills/landing-zone/` is the canonical copy and `.gemini/skills/landing-zone` links to it (ADR-010). No packaging step. The user pins a release tag or commit.
+  2. **From a `.zip`.** A `skill-v*` tag produces `landing-zone-<version>.zip` and its SHA-256 as a GitHub Release, for upload to an AI platform that takes a skill as an archive. The archive holds the skill folder only, with the symlink resolved, no `__pycache__`, entries sorted, a fixed timestamp and the executable bit kept on `scripts/lzctl`, so the same tag always gives the same checksum. There is no `.tar.gz`.
+  Both paths ship identical skill content. `lzctl doctor` is the first-run check. Users install the Python and scanner dependencies themselves.
+- **Hosts.** Certify one host first, then add a second. The proposed first is Gemini CLI, from the repository. The zip path is a second target: which platforms accept an upload, in what format, and whether they can run `lzctl` and the scanners is unverified and is tested before G1 claims it.
+- **What a run produces.** A validated, review-ready landing zone configuration directory, not a deployed landing zone. Nothing is created in a cloud and `apply` is never run (ADR-001). On an upload-only platform the model may be unable to run `lzctl`; the skill forbids writing the output by hand, so a run there ends at a validated spec. If a scanner is missing, its check is reported `not_applicable` and the output is not called fully validated (ADR-021).
+- **Out of scope for the MVP:**
+  - the hosted agent: `agent/`, `validator/`, `infra/`, Firestore, BigQuery audit, Model Armor, the GitHub App pull request flow, the spend meter (all P1, and ADR-026's controls 2 to 5 with them);
+  - the `regulated` profile, `1-vpcsc`, `2-security` and the `hardened` dataset (`2-security` belongs to Regulated in the profile mapping, so Standard does not need it);
+  - the other connectivity options (`ncc`, `nva`, `vpn`);
+  - Azure, AWS and OpenStack;
+  - Prometheus and Grafana (ADR-025).
+- **Starter's network.** The `single` topology is not rendered, so Starter's network is listed in `not_rendered_yet`. Render it before G1 or leave it disclosed; this is an open question, not a quality bar the gate relies on.
+- **Exit criteria (G1).**
+  1. The Starter and Standard golden specs render byte-identically on Python 3.11 and 3.13.
+  2. `lzctl check` reports no critical findings and no `not_applicable` for validate, tflint and conftest on the Standard golden render.
+  3. One person who did not build it takes a real requirements conversation to a rendered, checked output directory in under an hour on the certified host.
+  4. The checked-out repository works as a skill in the certified host, and the release `.zip` extracts on a clean machine with `scripts/lzctl` still executable and `lzctl doctor` passing. The zip is also rebuilt from the same tag and gives the same checksum.
+
+**Alternatives considered.**
+- *Keep P0 plus P1 as the MVP.* It tests the full promise, a pull request from a conversation, but it spends the infrastructure budget and weeks before the core is tried by anyone else, and a failure in intake quality would surface only at the end.
+- *Include the Regulated profile.* The likely first users in regulated settings, but it needs the `hardened` dataset, `1-vpcsc`, `2-security` and SCC Premium, which is unconfirmed (DESIGN.md open questions). It would more than double P0.
+- *A hosted-only MVP.* It gives the audit log and a governed path, but needs everything in P1 first.
+
+**Consequences.**
+- The first release has no audit log, no governed path and no pull request flow. Users run it on their own machine and open the pull request by hand. A run's evidence is the render report and the decision log in the output directory.
+- The cost to us is near zero: no new cloud resources, and tokens are charged to each user's own plan. The $20 cap is unaffected.
+- Users install the scanners themselves, and a missing one makes `lzctl check` report `not_applicable` for that check. The skill tells the user so rather than calling the output validated (SKILL.md, step 6).
+- Requirements text goes to the host's model provider. The data governance warning in DESIGN.md applies from the first release.
+- The model-dependent quality (intake, review) is first measured on one host and one model. Other hosts are unverified until their own eval runs.
+- Moving to MVP 2 adds the hosted agent on top of the same `lzctl` and skill, so hosted and local output stay byte-identical (DESIGN.md).
+- DESIGN.md, README and CICD.md change with this ADR: the MVP definition, the delivery plan and the phase of `release-skill.yml` (P1 to MVP).
+
+---
+
 ## Review log
 
 ### 2026-10-07: First review and verification of DESIGN.md
@@ -553,6 +600,7 @@ A ruleset was used rather than classic branch protection: rulesets are GitHub's 
 | Prometheus and Grafana scoped for the agent platform, then deferred | 025 |
 | Dev-only deployment, cost defaults and the $20 a month cap | 026 |
 | $20 monthly billing budget with alerts, scoped to this project, and the billing export to BigQuery (the only controls built so far) | 026 |
+| MVP scoped as a local GCP skill ending at G1, with the hosted agent as the next release | 027 |
 
 **Corrections found along the way**
 
@@ -564,3 +612,4 @@ A ruleset was used rather than classic branch protection: rulesets are GitHub's 
 | 30 | A resource inventory that covered only the services the design uses missed a registered domain and a DNS zone in the project, so the first estimate of current spend was far too low | The inventory now checks every enabled API's resources; the two are recorded in ADR-026 as costs outside the platform |
 | 31 | A Cloud Run placeholder in `us-west1` was untagged, untracked and outside our region | Deleted; every regional resource is now in `us-central1` |
 | 32 | The $1 to $3 a month estimate for Prometheus and Grafana assumed the sidecar adds almost no cost, but it scrapes between requests, when a request-billed Cloud Run service throttles CPU | Added to ADR-025's spike list; the estimate is marked unverified until the spike runs |
+| 33 | The MVP was defined as P0 plus P1, which put the whole hosted platform in front of the first user. A check of the profile mapping also showed `2-security` belongs to Regulated only, and that Starter's `single` network topology is not rendered | MVP redefined as P0 plus a release, ending at G1 (ADR-027); Starter's network is disclosed in `not_rendered_yet` unless rendered |

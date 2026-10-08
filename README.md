@@ -138,11 +138,11 @@ python -m pytest tests                                       # unit and render t
 
 ## 🗺️ Roadmap
 
-- [x] **Design:** architecture, spec schema, cost model, 26 ADRs
+- [x] **Design:** architecture, spec schema, cost model, 27 ADRs
 - [x] **CI foundation:** OIDC per GitHub environment, Terraform state, Secret Manager + KMS, environment folders
 - [x] **Community:** license, contributing guide, issue forms, Discussions, protected `dev` branch
-- [ ] **P0, core + GCP:** spec schema ✓, `lzctl` (validate, render, check, explain ✓), validator image, eval harness, FAST datasets (`0-org-setup` ✓, `2-networking` with peering ✓; security next)
-- [ ] **P1, hosted agent:** ADK 2.0 workflow on Cloud Run, PR flow, first pilot (Prometheus and Grafana are scoped but deferred)
+- [ ] **P0, core + GCP (the MVP, [ADR-027](docs/ADR.md#adr-027-the-mvp-is-a-local-gcp-skill-that-ends-at-gate-g1)):** a local skill for GCP, Starter and Standard, ending at gate G1. Done: spec schema, `lzctl` (validate, render, check, explain), FAST datasets (`0-org-setup`, `2-networking` with peering). To do: conftest policy pack and tflint config, README, validation report and decision log in the output, release `.zip`, one certified host
+- [ ] **P1, hosted agent (MVP 2):** ADK 2.0 workflow on Cloud Run, validator job, PR flow, first pilot (Prometheus and Grafana are scoped but deferred)
 - [ ] **P2, Azure, AWS, hosts:** AVM ALZ and Control Tower/AFT baselines, host compatibility matrix
 - [ ] **P3, OpenStack + hardening:** OpenStack modules, sandbox plans, security review
 

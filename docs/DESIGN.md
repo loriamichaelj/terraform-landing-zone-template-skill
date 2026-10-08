@@ -1,6 +1,6 @@
 # Design Doc: Terraform Landing Zone Agent (ADK on Cloud Run)
 
-Oct 7, 2026 · Author: M.L. · Last reviewed: Oct 7, 2026 (see [ADR.md](ADR.md) for decisions and change history)
+Oct 7, 2026 · Author: M.L. · Last reviewed: Oct 8, 2026 (see [ADR.md](ADR.md) for decisions and change history)
 
 ## Overview
 
@@ -124,11 +124,15 @@ references/
 schemas/
   lz-spec.core.schema.json
   lz-spec.<cloud>.schema.json
-templates/<cloud>/        # Jinja templates per baseline stage -> YAML datasets / tfvars
-policies/<cloud>/         # Rego rules used by conftest
-scripts/lzctl             # validate, render, check, explain, doctor
-evals/<cloud>/            # golden scenarios and expected specs
+templates/<cloud>/fast-<tag>/   # per baseline (ADR-020):
+  upstream/               #   verbatim pinned copy: dataset, JSON schemas, license
+  overlay/                #   Jinja templates that replace or add spec-driven files
+  MANIFEST.json           #   tag, commit and SHA-256 of every upstream file
+policies/<cloud>/         # Rego rules used by conftest (not written yet)
+scripts/lzctl             # spec validate, render, doctor built; check, explain next
 ```
+
+Golden specs and render hashes live outside the package, in the repo's `evals/` (see Repository layout), so the skill ships without test data.
 
 **Workflow nodes**
 
@@ -161,9 +165,9 @@ The LLM decides values; templates decide structure. Generated output is limited 
 **Rules**
 
 - One pinned baseline per cloud per skill version (see Landing zone template configurations).
-- The spec schema is generated from the baseline's own JSON schemas where they exist (Fabric FAST ships schemas for every factory file) and from module `variables.tf` otherwise, so hallucinated inputs fail schema validation before rendering.
-- Rendered output is validated again against the upstream schemas, which catches template bugs as well as spec bugs.
-- Templates are plain Jinja with no LLM in the render path, which makes rendering deterministic and unit-testable.
+- The spec schema is meant to be generated from the baseline's own JSON schemas where they exist (Fabric FAST ships schemas for every factory file) and from module `variables.tf` otherwise, so hallucinated inputs fail schema validation before rendering. Today it is handwritten, with unknown fields rejected; generation is planned.
+- Rendered output is validated again against the upstream schemas, which catches template bugs as well as spec bugs. Today the test suite does this for every rendered YAML file; `lzctl check` will do it at run time.
+- Templates are plain Jinja with no LLM in the render path, which makes rendering deterministic and unit-testable. For GCP the templates are overlays on a vendored copy of the pinned FAST dataset (ADR-020).
 - Bumping the baseline version requires a skill release and a full eval run.
 
 **Spec shape (abridged)**
@@ -365,7 +369,9 @@ agent/                # ADK app: workflow, nodes, tools, callbacks
 .gemini/skills/       # symlink to .agents/skills/
 validator/            # job image and entrypoint
 infra/                # Terraform for the agent's own platform
-evals/                # golden scenarios and expected specs
+evals/                # golden specs (evals/gcp/valid) and render hashes (evals/gcp/golden)
+tests/                # lzctl unit and render tests (pytest)
+tools/                # maintainer tools, such as vendor_fast.py
 docs/                 # design, ADRs, CI/CD strategy, runbooks
 .github/              # workflows, issue forms, PR template, CODEOWNERS, Dependabot
 ```

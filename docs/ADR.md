@@ -384,3 +384,5 @@ A ruleset was used rather than classic branch protection: rulesets are GitHub's 
 | 22 | The `classic` dataset has only development and production, but the spec allows `stage` | Overlay adds a `staging` tag value and stage folders (ADR-020) |
 | 23 | DESIGN.md said the `minimal` dataset is TBD; v59.0.0 also ships `starter-gcd`, which we haven't evaluated | Noted; Starter stays `classic` trimmed to one environment |
 | 24 | A pattern ending in `$` also matches before a trailing newline in Python, unlike ECMA-262 | Reject control characters in every spec string before rendering |
+| 25 | README and CONTRIBUTING still said "design stage" and that `lzctl` didn't exist; the README counted 18 ADRs, not 20 | Updated both; added a Try it section and development notes |
+| 26 | DESIGN.md's skill tree showed `templates/<cloud>/` and in-package `evals/`, and said the spec schema is generated | Tree now matches ADR-020 and the repo's `evals/`; the schema is described as handwritten for now |

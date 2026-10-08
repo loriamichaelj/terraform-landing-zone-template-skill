@@ -6,7 +6,7 @@ By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Project status
 
-The project is in the **design stage**. The repo holds the design ([docs/DESIGN.md](docs/DESIGN.md)), decision records ([docs/ADR.md](docs/ADR.md)), the CI/CD strategy ([docs/CICD.md](docs/CICD.md)) and the CI plumbing. The skill, the `lzctl` CLI and the agent aren't written yet.
+The project is early in **P0** (core and GCP). The repo holds the design ([docs/DESIGN.md](docs/DESIGN.md)), decision records ([docs/ADR.md](docs/ADR.md)), the CI/CD strategy ([docs/CICD.md](docs/CICD.md)), the CI plumbing, and the first slice of the skill: spec schemas, `lzctl spec validate` and `render` for the GCP `0-org-setup` dataset, and tests. `lzctl check`, the networking and security datasets, the hosted agent and the other clouds aren't written yet.
 
 The most useful contributions right now:
 
@@ -73,12 +73,19 @@ Anything that changes the architecture, a security control, a baseline choice or
 
 ## Development setup
 
-Today, contributions are mostly Markdown and workflow YAML. Useful tools:
+Contributions are Markdown, workflow YAML, and now the skill and `lzctl`. Useful tools:
 
+- Python 3.11+ for `lzctl` and the tests: `pip install -r tests/requirements.txt`, then `python -m pytest tests`
 - [actionlint](https://github.com/rhysd/actionlint) for workflow changes
 - A Markdown previewer that renders Mermaid (for the architecture diagram)
 
-Once the skill and `lzctl` exist, you'll need the runtime dependencies from DESIGN.md: Python 3.11, Terraform 1.16 (or OpenTofu), tflint, trivy and conftest. `lzctl doctor` will check them.
+`lzctl doctor` checks the runtime dependencies. Terraform 1.16 (or OpenTofu), tflint, trivy and conftest are optional today and become required when `lzctl check` lands.
+
+**Changing the skill:**
+
+- **Output changes need a golden update.** Rendering must stay byte-identical for a given spec. If a template or schema change alters the output, review the diff, then run `UPDATE_GOLDEN=1 python -m pytest tests` and commit `evals/gcp/golden/render-hashes.json` with the change.
+- **Never edit `templates/gcp/fast-*/upstream/`.** It is a verbatim copy of the pinned FAST release, checked against `MANIFEST.json`. Change the overlay templates, or re-vendor with `tools/vendor_fast.py` for a baseline bump (ADR-020).
+- **Every value that reaches a template must be pattern-restricted** in the schema, so a spec can't inject YAML.
 
 ## CI on pull requests from forks
 

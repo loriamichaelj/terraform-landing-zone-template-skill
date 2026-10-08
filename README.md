@@ -6,7 +6,7 @@
 
 A portable **Agent Skill** plus a hosted **ADK agent on Cloud Run** that turns landing zone requirements into validated Terraform for **GCP, Azure, AWS or OpenStack**, delivered as a GitHub pull request.
 
-[![Status: design stage](https://img.shields.io/badge/status-design%20stage-orange?style=for-the-badge)](docs/DESIGN.md)
+[![Status: P0 in progress](https://img.shields.io/badge/status-P0%20in%20progress-orange?style=for-the-badge)](docs/DESIGN.md#delivery-plan-and-milestones)
 [![License: Apache-2.0](https://img.shields.io/github/license/loriamichaelj/terraform-landing-zone-template-skill?style=for-the-badge&color=blue)](LICENSE)
 [![Ops: OIDC check](https://img.shields.io/github/actions/workflow/status/loriamichaelj/terraform-landing-zone-template-skill/ops-oidc-check.yml?branch=dev&style=for-the-badge&label=OIDC%20check&logo=githubactions&logoColor=white)](https://github.com/loriamichaelj/terraform-landing-zone-template-skill/actions/workflows/ops-oidc-check.yml)
 
@@ -117,9 +117,25 @@ flowchart LR
 | 🏢 **Standard** *(default)* | Most enterprise workloads | dev/stage/prod, hub-and-spoke network, guardrails, IAM groups, 1-year audit logs |
 | 🏦 **Regulated** | SOC 2, PCI-DSS, HIPAA scope | Customer-managed keys, private-only access, service perimeters, stricter policy pack, break-glass |
 
+## 🚀 Try it
+
+Today's slice runs locally: validate a spec, then render the GCP `0-org-setup` dataset from it. It needs Python 3.11+.
+
+```bash
+pip install -r tests/requirements.txt
+S=.agents/skills/landing-zone/scripts/lzctl
+
+$S doctor                                                    # check dependencies
+$S spec validate evals/gcp/valid/standard.spec.json          # findings name the spec field to fix
+$S render evals/gcp/valid/standard.spec.json --out /tmp/lz   # FAST dataset + render-report.json
+python -m pytest tests                                       # unit and render tests
+```
+
+`render` covers the hierarchy, environments and audit logging. Networking, security and the Regulated profile are not rendered yet, and every render lists the spec fields it left out (`not_rendered_yet`). See [ADR-020](docs/ADR.md#adr-020-gcp-output-is-a-vendored-fast-dataset-plus-overlay-templates).
+
 ## 🗺️ Roadmap
 
-- [x] **Design:** architecture, spec schema, cost model, 18 ADRs
+- [x] **Design:** architecture, spec schema, cost model, 20 ADRs
 - [x] **CI foundation:** OIDC per GitHub environment, Terraform state, Secret Manager + KMS, environment folders
 - [x] **Community:** license, contributing guide, issue forms, Discussions, protected `dev` branch
 - [ ] **P0, core + GCP:** spec schema ✓, `lzctl` (validate, render ✓; check, explain next), validator image, eval harness, FAST datasets (`0-org-setup` ✓; networking and security next)
@@ -136,6 +152,7 @@ Phases are gated, not dated: each starts when the previous gate passes. Details 
 | 🏛️ | [DESIGN.md](docs/DESIGN.md) | Architecture, spec schema, baselines, security, cost estimate, delivery plan |
 | 🧭 | [ADR.md](docs/ADR.md) | Architecture decision records and review log |
 | 🔁 | [CICD.md](docs/CICD.md) | Branches, environments, workflow inventory, naming conventions, actions policy |
+| 🧩 | [Skill package](.agents/skills/landing-zone/SKILL.md) | The `SKILL.md` workflow, spec fields and the GCP baseline reference, as agents read them |
 | 🔑 | [State bucket and OIDC](docs/runbooks/gcp-state-bucket-and-github-oidc.md) | GitHub Actions to GCP without keys (the GCP equivalent of an AWS OIDC role) |
 | 🤫 | [Secrets](docs/runbooks/secrets.md) | Secret Manager with a KMS key, and GitHub environment secrets |
 
@@ -171,7 +188,7 @@ gh workflow run ops-oidc-check.yml -f environment=dev
 
 ## 🤝 Contributing
 
-The project is in the design stage, so this is the best time to shape it. **Design review and cloud expertise are especially welcome**: Azure ALZ, AWS Control Tower and OpenStack gotchas, spec schema critiques, and answers to the open questions at the end of each doc.
+The design is settled enough to build on and still open to change: P0 is under way, and only the GCP `0-org-setup` slice renders so far. **Design review and cloud expertise are especially welcome**: Azure ALZ, AWS Control Tower and OpenStack gotchas, spec schema critiques, and answers to the open questions at the end of each doc.
 
 | I want to… | Go to |
 | --- | --- |

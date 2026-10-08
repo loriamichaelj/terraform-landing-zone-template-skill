@@ -2,7 +2,7 @@
 
 # 🏗️ Terraform Landing Zone Template Skill
 
-### The goal: from a requirements conversation to a review-ready landing zone PR in under an hour.
+### The goal: from a requirements conversation to a review-ready landing zone PR.
 
 A portable **Agent Skill** plus a hosted **ADK agent on Cloud Run** that turns landing zone requirements into validated Terraform for **GCP, Azure, AWS or OpenStack**, delivered as a GitHub pull request.
 

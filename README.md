@@ -173,6 +173,7 @@ Phases are gated, not dated: each starts when the previous gate passes. Details 
 | Terraform state | `gs://skills-mjl-27850-tlz-tfstate`, one prefix per environment |
 | OIDC provider | `projects/853750160087/locations/global/workloadIdentityPools/github/providers/github-actions` |
 | Secrets | Secret Manager, encrypted with KMS key `tlz/secret-manager` |
+| Budget | $20 a month on the project, alerts at 50%, 75%, 90% and 100% of spend and at 100% of forecast (ADR-026) |
 
 | GitHub environment | Service account | Can read secrets named |
 | --- | --- | --- |

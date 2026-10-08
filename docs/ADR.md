@@ -443,7 +443,7 @@ A ruleset was used rather than classic branch protection: rulesets are GitHub's 
 
 **Status:** Proposed · 2026-10-08 · Requested by the project owner · Amends ADR-015 (the later `main` and `prod`) and ADR-025; consistent with ADR-017, whose empty `stage` and `prod` folders stay
 
-**Context.** The owner will build and run this platform in `dev` only and wants cost cut sharply. The design had assumed `dev` plus `prod`, an always-on Cloud Run instance, Gemini 3.1 Pro (a preview model) for review, and scheduled model evals. Priced out (DESIGN.md), that was about $110 to $390 a month to run plus $300 to $600 a month of eval spend while building. Most of the cloud bill was tokens, the second environment and evals, not idle infrastructure.
+**Context.** The owner will build and run this platform in `dev` only, wants cost cut sharply, and has set a hard maximum of $20 a month for the project. The design had assumed `dev` plus `prod`, an always-on Cloud Run instance, Gemini 3.1 Pro (a preview model) for review, and scheduled model evals. Priced out (DESIGN.md), that was about $110 to $390 a month to run plus $300 to $600 a month of eval spend while building. Most of the cloud bill was tokens, the second environment and evals, not idle infrastructure.
 
 **Decision.**
 - **One environment.** The platform deploys to `dev` only. There is no `prod`, no `stage`, no `main` release branch, no `dev-plan` split until someone else depends on the platform. The `stage` and `prod` folders (ADR-017) stay empty and cost nothing, and the `stage`, `prod` and `main` rows in CICD.md are marked not planned. This is about this platform's own deployment: the spec's `hierarchy.environments` still lists whatever environments the customer's landing zone has.
@@ -452,6 +452,7 @@ A ruleset was used rather than classic branch protection: rulesets are GitHub's 
 - **Evals.** Deterministic evals (golden hashes, schema, `lzctl check`) run in CI and cost nothing. Model-backed evals run only on demand (`ops-evals.yml`, manual) and before a release, with a monthly budget cap that stops the workflow. No scheduled full runs.
 - **Model Armor** is optional in `dev`. Enable it if its price at this volume is a few dollars a month. If it is not, the other injection defences stand (typed `lzctl` arguments, workflow-enforced gates, no write credentials in reach, requirements treated as data) and the gap is recorded in the PR body and the risk table.
 - **Housekeeping that keeps free tiers free:** 30-day lifecycle on artifacts, Artifact Registry keeps the last 5 images, a log exclusion for debug noise, and a budget alert on the project.
+- **The $20 cap** is a design requirement, split as about $3 for the fixed floor, $14 for model tokens including evals, and $3 of headroom. Tokens are the only line that can grow, so they are the one capped in code. Controls, in order: (1) a billing budget of $20 a month on this project with alerts at 50, 75, 90 and 100% of actual spend and at 100% of forecast, which **exists as of 2026-10-08** and only sends email; (2) an in-app spend meter that refuses new runs at the $14 token budget; (3) a per-run token ceiling alongside the 3 review loops; (4) a daily model-API quota override, if one can be set; (5) a conftest cost policy on `infra/` that fails CI on min instances above 0, max instances above 1, or a VM, Cloud SQL, load balancer or NAT. Controls 2 to 5 are built with the hosted agent in P1. A billing kill switch is not planned: detaching billing would stop everything, including the state bucket.
 - **Not changed:** CMEK (ADR-014), tags (ADR-012, ADR-019), IAP, validator isolation and the human approval gate. They cost cents and are the reason an adopter can trust the output.
 
 **Consequences.**
@@ -459,6 +460,8 @@ A ruleset was used rather than classic branch protection: rulesets are GitHub's 
 - There is no production copy to promote to. A bad deploy reaches every user at once, so the deterministic CI and the pilot's trust matter more. Adding `prod` later means a new ADR, a GitHub environment, a service account and a release branch.
 - Review quality on Flash is unmeasured. It is a bet, checked against the golden set before G2, and reversed by switching the review step's model.
 - The remaining big cost is engineer time: P2 and P3 (Azure, AWS, OpenStack, hardening) are about $58K to $82K of the $100K to $140K build estimate. Dev-only does not change that; deferring those phases would.
+- With controls 1 to 5 in place the worst month is about $19 and a typical one $7 to $10. Until P1 only control 1 exists, and it cannot stop spend, so the cap holds only because almost nothing billable is running.
+- If the token budget is reached, new runs are refused until the next month. That is intended.
 - Cost numbers use free tiers and list prices that are not all verified yet (see the review log's unverified list).
 
 ---
@@ -507,7 +510,7 @@ A ruleset was used rather than classic branch protection: rulesets are GitHub's 
 - Whether Agent Identity (SPIFFE-based) can be used by a Cloud Run-hosted agent, or only by Agent Runtime.
 - Grok Build's project skill folder: run `grok inspect` in this repo to confirm it finds the skill.
 - Observability (ADR-025): Grafana to Managed Service for Prometheus authentication from Cloud Run, sidecar support on Cloud Run jobs, IAP header sign-on in Grafana, and Grafana's usage against the free tier at min instances 0.
-- Cost cuts (ADR-026): Cloud Run's monthly free tier amounts, Model Armor pricing at 50 runs a month, whether Gemini 3 Flash is good enough for review (an eval question), the cached-input rate for Flash, and that the Artifact Registry and KMS volumes stay under a few dollars.
+- Cost cuts (ADR-026): Cloud Run's monthly free tier amounts, Model Armor pricing at 50 runs a month, whether Gemini 3 Flash is good enough for review (an eval question), whether a model-API request quota can be overridden, the cached-input rate for Flash, and that the Artifact Registry and KMS volumes stay under a few dollars.
 - Roadmap phases and gates were reconstructed from the draft's text, because the original embedded roadmap was not in the file. The engineer-week totals match the cost table; confirm the phase boundaries with the author.
 
 ### 2026-10-07: Build-out and docs sweep
@@ -538,3 +541,22 @@ A ruleset was used rather than classic branch protection: rulesets are GitHub's 
 | 24 | A pattern ending in `$` also matches before a trailing newline in Python, unlike ECMA-262 | Reject control characters in every spec string before rendering |
 | 25 | README and CONTRIBUTING still said "design stage" and that `lzctl` didn't exist; the README counted 18 ADRs, not 20 | Updated both; added a Try it section and development notes |
 | 26 | DESIGN.md's skill tree showed `templates/<cloud>/` and in-package `evals/`, and said the spec schema is generated | Tree now matches ADR-020 and the repo's `evals/`; the schema is described as handwritten for now |
+
+### 2026-10-08: Scope, cost and observability
+
+**Built or decided** (each recorded in its ADR):
+
+| What | ADR |
+| --- | --- |
+| `lzctl check`, trivy and checkov scans, `lzctl explain`, the 2-networking render | 021, 022, 023, 024 |
+| Prometheus and Grafana scoped for the agent platform, then deferred | 025 |
+| Dev-only deployment, cost defaults and the $20 a month cap | 026 |
+| $20 monthly billing budget with alerts, scoped to this project (the only control built so far) | 026 |
+
+**Corrections found along the way**
+
+| # | Issue | Fix |
+| --- | --- | --- |
+| 27 | CI: Docs failed on the first run after vendoring the networking stage: the upstream README's relative links point into the upstream repo | The docs checker skips vendored `upstream/` trees |
+| 28 | The Trivy version was passed through an environment variable, which zizmor flagged as unpinned, and repository variables were expanded inside `run:` blocks | Literal version; variables passed through `env:` |
+| 29 | The cost model assumed `prod`, an always-on instance, Pro review and scheduled evals | Rebuilt for dev only (ADR-026); figures in DESIGN.md recomputed |

@@ -77,6 +77,7 @@ Functional requirements define what the agent produces; non-functional requireme
 | Determinism | Same spec plus same skill version renders byte-identical output |
 | Latency | p95 end-to-end under 5 minutes from confirmed spec to PR (target; validate in P1) |
 | Cost | Token and compute cost per run tracked and reported per team |
+| Cost cap | The project stays under $20 a month: a billing budget alerts at 50, 75, 90 and 100%, and the hosted agent refuses new runs once the month's model spend reaches its $14 token budget (ADR-026) |
 | Observability | Every run writes a structured run record (outcome, duration, findings, tokens, model and skill versions) that the SLIs below can be computed from. Prometheus metrics, Grafana dashboards and burn-rate alerts are scoped but deferred (ADR-025); when built, metric labels never carry requirements content |
 | Data residency | All storage and model calls pinned to approved regions |
 | Encryption | CMEK on storage holding specs, artifacts and logs |
@@ -503,7 +504,7 @@ Phases are gated rather than dated: a phase starts only when the previous gate's
 
 ## Cost estimate
 
-This platform is deployed in `dev` only (ADR-026), and everything scales to zero. Running it costs about $10 to $45 a month, or about $15 to $70 with capped model evals, and model tokens are most of it. Prometheus and Grafana are deferred (ADR-025) and add about $1 to $3 a month when built. Before ADR-026 the plan was $110 to $390 a month for dev plus prod plus $300 to $600 for evals while building. Engineer time is the real cost: building all four clouds is about $100K to $140K (about $5K more with the deferred observability), and maintenance, not cloud spend, is the long-run cost driver.
+This platform is deployed in `dev` only, and everything scales to zero (ADR-026). The owner's hard cap is **$20 a month**: a billing budget with alerts already exists on the project, and the token line, the only one that can grow, gets an in-app budget when the hosted agent is built. Without that cap the figures below can reach the high end. Running it costs about $10 to $45 a month, or about $15 to $70 with capped model evals, and model tokens are most of it. Prometheus and Grafana are deferred (ADR-025) and add about $1 to $3 a month when built. Before ADR-026 the plan was $110 to $390 a month for dev plus prod plus $300 to $600 for evals while building. Engineer time is the real cost: building all four clouds is about $100K to $140K (about $5K more with the deferred observability), and maintenance, not cloud spend, is the long-run cost driver.
 
 **Assumptions:** us-central1 (Tier 1), 50 runs a month, Gemini 3 Flash for intake and review (no Pro; see ADR-026), list prices in USD, Cloud Run and other free tiers applied. Agent Platform prices can differ from Gemini API list prices; confirm in the pricing calculator before budgeting.
 
@@ -576,6 +577,7 @@ The largest risk is false confidence: a PR that passes static checks but fails a
 | Low adoption because platform engineers distrust generated config | High | Decision log, deterministic rendering and small diffs make review fast; pilot with one team per cloud |
 | Upstream baseline drift (FAST major releases rename modules and change `factories_config`; provider majors such as AzureRM 5.0) | Medium | Pin by tag per cloud; schema regenerated and evals rerun on every bump |
 | Flash-only review is weaker than a Pro model on conflicting requirements | Medium | Measure it against the golden set before G2; escalate review to a Pro model only if evals show a gap (ADR-026); pin the model version and re-run evals before any switch |
+| Spend passes the $20 cap | Medium | Billing budget alerts (built); in-app token budget, per-run ceiling, quota override and a CI cost policy (P1); no billing kill switch, because detaching billing would stop everything |
 | Scale to zero makes the first request after idle slow | Low | Startup CPU boost; sessions in Firestore so nothing is lost; set expectations in the interface |
 | AWS landing zone is only partly Terraform-native (Control Tower, AFT) | Medium | Generate AFT requests and SCPs only; leave Control Tower enablement to a one-time, documented step |
 | Host behavior drift (new Codex, Gemini CLI, Grok Build releases; skill paths have already moved once) | Medium | Host x model eval matrix; pin skill compatibility notes per host version |

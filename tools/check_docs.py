@@ -61,11 +61,14 @@ def anchors(path: Path, cache: dict[Path, set[str]]) -> set[str]:
 
 
 def markdown_files(root: Path) -> list[Path]:
+    """The repo's own markdown. Vendored upstream trees are verbatim third-party files whose links point into
+    the upstream repo, and they must not be edited, so they are not checked."""
     try:
         out = subprocess.run(["git", "ls-files", "*.md"], cwd=root, capture_output=True, text=True, check=True).stdout
-        return sorted(root / line for line in out.splitlines() if (root / line).is_file())
+        found = [root / line for line in out.splitlines() if (root / line).is_file()]
     except (OSError, subprocess.CalledProcessError):
-        return sorted(p for p in root.rglob("*.md") if ".git" not in p.parts)
+        found = [p for p in root.rglob("*.md") if ".git" not in p.parts]
+    return sorted(p for p in found if "upstream" not in p.relative_to(root).parts)
 
 
 def check_links(root: Path, files: list[Path]) -> list[str]:

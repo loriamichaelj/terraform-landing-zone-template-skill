@@ -127,3 +127,12 @@ def test_cli_exit_codes(tmp_path):
     assert run(str(ROOT)).returncode == 0
     assert run(str(tmp_path)).returncode == 1
     assert run(str(tmp_path / "nope")).returncode == 2
+
+
+def test_vendored_upstream_markdown_is_not_checked(tmp_path):
+    vendored = tmp_path / "templates/fast/upstream/dataset"
+    vendored.mkdir(parents=True)
+    (vendored / "README.md").write_text("[broken](../../../../nowhere.md)\n")
+    (tmp_path / "a.md").write_text("[ok](a.md)\n")
+    assert [p.name for p in cd.markdown_files(tmp_path)] == ["a.md"]
+    assert cd.main([str(tmp_path)]) == 0

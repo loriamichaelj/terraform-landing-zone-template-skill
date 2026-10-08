@@ -458,7 +458,7 @@ How it fits together:
 
 An evals dashboard (pass rate and drift per scenario, from the eval results in BigQuery) is deferred until the eval harness writes results somewhere queryable.
 
-**Not yet verified, check in a spike before building (ADR-025):** how Grafana authenticates to Managed Service for Prometheus from Cloud Run (Google calls the frontend proxy legacy; the Cloud Monitoring data source in PromQL mode is the fallback), whether sidecars are supported on Cloud Run jobs, and whether Grafana can verify IAP's signed header for single sign-on.
+**Not yet verified, check in a spike before building (ADR-025):** how Grafana authenticates to Managed Service for Prometheus from Cloud Run (Google calls the frontend proxy legacy; the Cloud Monitoring data source in PromQL mode is the fallback), whether sidecars are supported on Cloud Run jobs, whether Grafana can verify IAP's signed header for single sign-on, and whether the Prometheus sidecar can scrape on a request-billed Cloud Run service (CPU is throttled between requests) or needs CPU always allocated, which would raise the cost.
 
 **Evals**
 
@@ -504,7 +504,7 @@ Phases are gated rather than dated: a phase starts only when the previous gate's
 
 ## Cost estimate
 
-This platform is deployed in `dev` only, and everything scales to zero (ADR-026). The owner's hard cap is **$20 a month**: a billing budget with alerts already exists on the project, and the token line, the only one that can grow, gets an in-app budget when the hosted agent is built. Without that cap the figures below can reach the high end. Running it costs about $10 to $45 a month, or about $15 to $70 with capped model evals, and model tokens are most of it. Prometheus and Grafana are deferred (ADR-025) and add about $1 to $3 a month when built. Before ADR-026 the plan was $110 to $390 a month for dev plus prod plus $300 to $600 for evals while building. Engineer time is the real cost: building all four clouds is about $100K to $140K (about $5K more with the deferred observability), and maintenance, not cloud spend, is the long-run cost driver.
+This platform is deployed in `dev` only, and everything scales to zero (ADR-026). The owner's hard cap is **$20 a month**: a billing budget with alerts already exists on the project, and the token line, the only one that can grow, gets an in-app budget when the hosted agent is built. Without that cap the figures below can reach the high end. Running it costs about $10 to $45 a month, or about $15 to $70 with capped model evals, and model tokens are most of it. Prometheus and Grafana are deferred (ADR-025) and add about $1 to $3 a month when built, if the sidecar works on a request-billed service (unverified). Before ADR-026 the plan was $110 to $390 a month for dev plus prod plus $300 to $600 for evals while building. Engineer time is the real cost: building all four clouds is about $100K to $140K (about $5K more with the deferred observability), and maintenance, not cloud spend, is the long-run cost driver.
 
 **Assumptions:** us-central1 (Tier 1), 50 runs a month, Gemini 3 Flash for intake and review (no Pro; see ADR-026), list prices in USD, Cloud Run and other free tiers applied. Agent Platform prices can differ from Gemini API list prices; confirm in the pricing calculator before budgeting.
 

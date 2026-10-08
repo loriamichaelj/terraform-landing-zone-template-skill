@@ -328,6 +328,7 @@ A ruleset was used rather than classic branch protection: rulesets are GitHub's 
 | CI/CD strategy, naming conventions, **Ops: OIDC check** workflow (passing in `dev` and `bootstrap`) | 015 |
 | License, community files, Discussions, merge and security settings | 016 |
 | `dev`, `stage` and `prod` folders, org-level `environment` tag, project moved into `dev` | 017 |
+| `dev` ruleset: pull requests only, code-owner approval, owner bypass | 018 |
 
 **Corrections found along the way**
 

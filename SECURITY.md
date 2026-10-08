@@ -49,3 +49,4 @@ The project is pre-release. Only the latest commit on the `dev` branch is suppor
 - GitHub private vulnerability reporting, Dependabot alerts and security updates, secret scanning and push protection
 - OIDC (Workload Identity Federation) for CI, with no long-lived cloud keys; each GitHub environment can use only its own service account
 - Actions pinned to commit SHAs, and approval required before workflows run on pull requests from outside contributors
+- A protected `dev` branch: changes only through pull requests with a code-owner approval, no force-pushes or deletion

@@ -18,7 +18,7 @@ This covers how code in this repo is tested, released and deployed: branches, en
 
 | Branch | Role | Deploys to |
 | --- | --- | --- |
-| `dev` (default) | Integration branch; every change lands here by pull request | `dev` environment, on merge |
+| `dev` (default) | Integration branch; every change lands here by pull request with a code-owner approval, enforced by the **dev: pull requests only** ruleset (only the repo admin can bypass, [ADR-018](ADR.md#adr-018-dev-accepts-changes-only-by-pull-request-except-the-owner)) | `dev` environment, on merge |
 | `feature/*`, `fix/*`, `docs/*`, `ci/*` | Short-lived work branches | Nothing; plan-only |
 | `main` (later) | Release branch, created when a production environment exists | `prod`, by promotion |
 

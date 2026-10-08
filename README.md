@@ -119,9 +119,9 @@ flowchart LR
 
 ## 🗺️ Roadmap
 
-- [x] **Design:** architecture, spec schema, cost model, 17 ADRs
+- [x] **Design:** architecture, spec schema, cost model, 18 ADRs
 - [x] **CI foundation:** OIDC per GitHub environment, Terraform state, Secret Manager + KMS, environment folders
-- [x] **Community:** license, contributing guide, issue forms, Discussions
+- [x] **Community:** license, contributing guide, issue forms, Discussions, protected `dev` branch
 - [ ] **P0, core + GCP:** spec schema, `lzctl`, validator image, eval harness, FAST datasets
 - [ ] **P1, hosted agent:** ADK 2.0 workflow on Cloud Run, PR flow, first pilot
 - [ ] **P2, Azure, AWS, hosts:** AVM ALZ and Control Tower/AFT baselines, host compatibility matrix
@@ -165,7 +165,7 @@ Each environment has `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`, `T
 gh workflow run ops-oidc-check.yml -f environment=dev
 ```
 
-**Conventions:** every resource this repo creates carries the tag `skills-mjl-27850/name/Terraform-Landing-Zone-Template-Skill` ([ADR-012](docs/ADR.md#adr-012-tag-every-resource-this-repo-creates)); folders and projects also carry the org-level `environment` tag ([ADR-017](docs/ADR.md#adr-017-environment-folders-and-the-environment-tag)).
+**Conventions:** every resource this repo creates carries the tag `skills-mjl-27850/name/Terraform-Landing-Zone-Template-Skill` ([ADR-012](docs/ADR.md#adr-012-tag-every-resource-this-repo-creates)); folders and projects also carry the org-level `environment` tag ([ADR-017](docs/ADR.md#adr-017-environment-folders-and-the-environment-tag)). `dev` accepts changes only through reviewed pull requests; only the repo admin can push directly ([ADR-018](docs/ADR.md#adr-018-dev-accepts-changes-only-by-pull-request-except-the-owner)).
 
 </details>
 
@@ -177,7 +177,7 @@ The project is in the design stage, so this is the best time to shape it. **Desi
 | --- | --- |
 | 💬 Ask a question or share an idea | [Discussions](https://github.com/loriamichaelj/terraform-landing-zone-template-skill/discussions) |
 | 🐛 Report a bug, request a feature, propose a design change | [New issue](https://github.com/loriamichaelj/terraform-landing-zone-template-skill/issues/new/choose) |
-| 🛠️ Send a change | [CONTRIBUTING.md](CONTRIBUTING.md): branch from `dev`, Conventional Commits PR title, squash-merged |
+| 🛠️ Send a change | [CONTRIBUTING.md](CONTRIBUTING.md): branch from `dev`, Conventional Commits PR title, one code-owner approval, squash-merged |
 | 🔐 Report a vulnerability | Privately, per [SECURITY.md](SECURITY.md) |
 
 Please follow the [Code of Conduct](CODE_OF_CONDUCT.md). Need help? See [SUPPORT.md](SUPPORT.md).

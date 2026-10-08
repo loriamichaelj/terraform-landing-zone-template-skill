@@ -136,5 +136,6 @@ Required status checks are named `<workflow name> / <job name>`, so renaming a w
 
 - [ ] **Branch protection timing:** add the `dev` ruleset now (blocks direct pushes and force-pushes from then on), or after the first CI workflows exist?
 - [ ] **`dev-plan` identity:** create it in P0 with `infra/`, or plan with `lz-dev-sa` until the first real deploy?
-- [ ] **Production:** when to create `main` and `prod`, and who approves promotions?
+- [ ] **Production:** when to create `main` and `prod`, and who approves promotions? The GCP `stage` and `prod` folders exist but stay empty until then ([ADR-017](ADR.md#adr-017-environment-folders-and-the-environment-tag)).
+- [ ] **Stage:** add a `stage` environment to the pipeline between `dev` and `prod`, or keep promoting straight from `dev`? Decide when the `stage` folder is first populated.
 - [ ] **Eval spend:** is $65 per weekly full run (about $280 a month) acceptable for CI, separate from the run cost in DESIGN.md?

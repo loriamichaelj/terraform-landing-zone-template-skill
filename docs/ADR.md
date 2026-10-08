@@ -245,7 +245,7 @@ This replaces the single `lz-ci-sa` in DESIGN.md with per-environment accounts. 
 **Consequences.**
 - Folder names at the org root are unique, so no other top-level folder can be called `dev`, `stage` or `prod`.
 - Org policies and IAM set on a folder now apply to the project. Today the folders have none, so the project's effective access didn't change.
-- `stage` and `prod` folders exist, but there are no matching GitHub environments, service accounts or state prefixes yet. CICD.md still plans `prod` for later and has no `stage`. Decide whether stage joins the pipeline before creating them.
+- `stage` and `prod` stay empty for now (owner decision, 2026-10-07): no projects, GitHub environments, service accounts or state prefixes. They hold the place and the environment tag until those environments are needed. Whether stage joins the pipeline is decided when it's first populated (CICD.md).
 - The ADR-012 name tag binding to folders showed that a project-parented tag key works across the organization; ADR-012 was corrected.
 
 ---

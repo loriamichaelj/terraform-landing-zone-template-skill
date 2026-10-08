@@ -376,7 +376,7 @@ docs/                 # design, ADRs, CI/CD strategy, runbooks
 .github/              # workflows, issue forms, PR template, CODEOWNERS, Dependabot
 ```
 
-Built so far: `docs/`, `.github/` and the community files (LICENSE, CONTRIBUTING, SECURITY, SUPPORT, CODE_OF_CONDUCT), plus the first P0 slices: the skill package with the core and GCP spec schemas, `lzctl spec validate`, `render`, `check`, `explain` and `doctor`, the vendored FAST v59.0.0 `classic` dataset with overlay templates (ADR-020), the `.gemini/skills` symlink, golden GCP specs and render hashes in `evals/`, and tests in `tests/`. `render` covers the `0-org-setup` dataset only. The networking and security datasets, policies, `agent/`, `validator/` and `infra/` come next, with P0 and P1.
+Built so far: `docs/`, `.github/` and the community files (LICENSE, CONTRIBUTING, SECURITY, SUPPORT, CODE_OF_CONDUCT), plus the first P0 slices: the skill package with the core and GCP spec schemas, `lzctl spec validate`, `render`, `check`, `explain` and `doctor`, the vendored FAST v59.0.0 `classic` and `hub-and-spokes-peerings` datasets with overlay templates (ADR-020, ADR-024), the `.gemini/skills` symlink, golden GCP specs and render hashes in `evals/`, and tests in `tests/`. `render` covers the `0-org-setup` dataset and the `2-networking` stage for hub-and-spoke over peering. The security dataset, the other connectivity options, policies, `agent/`, `validator/` and `infra/` come next, with P0 and P1.
 
 **Pipeline** (full strategy, environments and naming in [CICD.md](CICD.md))
 

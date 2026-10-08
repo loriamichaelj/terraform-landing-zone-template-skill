@@ -1,6 +1,6 @@
 # GCP baseline
 
-**Baseline:** Cloud Foundation Fabric FAST, pinned by release tag (`v59.0.0`). Hierarchy: organization, folders, projects. `lzctl render` produces the `0-org-setup` dataset from the vendored upstream copy plus overlay templates (ADR-020).
+**Baseline:** Cloud Foundation Fabric FAST, pinned by release tag (`v59.0.0`). Hierarchy: organization, folders, projects. `lzctl render` produces the `0-org-setup` dataset and, for hub-and-spoke over peering, the `2-networking` dataset, from the vendored upstream copy plus overlay templates (ADR-020, ADR-024).
 
 ## Profile mapping
 
@@ -29,6 +29,10 @@
 | `hierarchy.environments` | `dev`, `stage`, `prod` folders under networking and security, and the `environment` tag values |
 | `hierarchy.business_units` | Folders under `Teams` |
 | `logging.retention_days`, `audit_destination` | Audit log buckets in the log project (`analytics` and `both` turn on Log Analytics) |
+| `network.topology: hub_spoke` with `hub_connectivity: peering` (the default) | `2-networking`: a hub VPC, and a project and peered spoke VPC per environment |
+| `network.regions` | A default /24 subnet and Cloud NAT per region, in every VPC (at most 8 regions; put the primary region first and append new regions at the end) |
+| `network.cidr_supernet` | The CIDR plan: four fixed slots (hub, dev, stage, prod), one block per region in each; the range of an existing region or environment never moves |
+| `network.private_service_access` | A private service access range (up to a /20) in each spoke |
 
 Everything else is reported in `not_rendered_yet` and is not in the configuration. Do not tell the user it is.
 

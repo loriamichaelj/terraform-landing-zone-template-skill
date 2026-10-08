@@ -71,22 +71,18 @@ def test_golden_output_hashes():
     assert actual == json.loads(GOLDEN.read_text()), "rendered output changed; review it, then rerun with UPDATE_GOLDEN=1"
 
 
-def test_rendered_yaml_validates_against_upstream_schemas(rendered):
-    schemas = ROOT / ".agents/skills/landing-zone/templates/gcp/fast-v59.0.0/upstream/schemas"
-    checked = 0
-    for files, _ in rendered.values():
+def test_rendered_yaml_validates_against_upstream_schemas(rendered, tmp_path):
+    """Every rendered YAML file passes `lzctl check`, which picks each stage's own schemas."""
+    for name, (files, report) in rendered.items():
+        out = tmp_path / name
         for path, data in files.items():
-            if not path.endswith((".yaml", ".yml")):
-                continue
-            declared = re.search(rb"yaml-language-server: \$schema=\S*?([\w-]+\.schema\.json)", data)
-            # Some upstream files hold only comments; an empty factory file means an empty map.
-            document = yaml.safe_load(data) or {}
-            if declared is None:
-                continue
-            schema = json.loads((schemas / declared.group(1).decode()).read_text())
-            validators.validator_for(schema)(schema).validate(document)
-            checked += 1
-    assert checked >= 50
+            (out / path).parent.mkdir(parents=True, exist_ok=True)
+            (out / path).write_bytes(data)
+        (out / lzctl.REPORT_NAME).write_text(json.dumps(report))
+        checks, findings = lzctl.check_output(out)
+        assert findings == [], name
+        detail = next(c["detail"] for c in checks if c["name"] == "upstream-schemas")
+        assert int(detail.split()[0]) >= (60 if name == "standard" else 30), (name, detail)
 
 
 def test_values_land_where_the_spec_says(rendered):
@@ -150,11 +146,14 @@ def test_tfvars_points_at_the_rendered_dataset(rendered):
 
 
 def test_report_lists_what_is_not_rendered(rendered):
+    # Standard is hub-and-spoke over peering, so its network fields are rendered (see test_lzctl_networking.py).
     std = rendered["standard"][1]["not_rendered_yet"]
-    assert std["network.topology"] and std["network.regions[1:]"] and std["extensions.gcp.hub_connectivity"]
+    assert not [field for field in std if field.startswith("network.") or field == "extensions.gcp.hub_connectivity"]
+    assert "iam.groups.network_admins" in std
+    # Starter is a single VPC, which has no upstream dataset.
     start = rendered["starter"][1]["not_rendered_yet"]
     assert "network.regions[1:]" not in start and "extensions.gcp.hub_connectivity" not in start
-    assert "network.topology" in start and "network.cidr_supernet" in start
+    assert "single topology" in start["network.topology"] and "network.cidr_supernet" in start
 
 
 def test_report_digests_match_the_files(rendered):

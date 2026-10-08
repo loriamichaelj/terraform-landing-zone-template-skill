@@ -1,6 +1,7 @@
 """Tests for tools/check_docs.py (links, anchors and the ADR index)."""
 
 import importlib.util
+import re
 import shutil
 import subprocess
 import sys
@@ -115,8 +116,9 @@ def test_adr_without_status_is_found(repo):
 
 
 def test_readme_adr_count_must_match(repo):
-    edit(repo / "README.md", "23 ADRs", "19 ADRs")
-    assert any("says 19 ADRs" in m for m in findings(repo))
+    readme = repo / "README.md"
+    readme.write_text(re.sub(r"\b\d+ ADRs\b", "999 ADRs", readme.read_text()))
+    assert any("says 999 ADRs" in m for m in findings(repo))
 
 
 def test_cli_exit_codes(tmp_path):

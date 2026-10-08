@@ -31,6 +31,7 @@ Statuses: **Proposed** (in the design, awaiting reviewer sign-off) · **Accepted
 | [021](#adr-021-lzctl-check-verifies-rendered-output-and-says-which-checks-did-not-run) | `lzctl check` verifies rendered output and says which checks did not run | Accepted | 2026-10-08 |
 | [022](#adr-022-trivy-and-checkov-both-scan-rendered-hcl) | Trivy and Checkov both scan rendered HCL | Accepted | 2026-10-08 |
 | [023](#adr-023-the-render-report-records-which-spec-fields-drive-each-file-and-lzctl-explain-reads-it) | The render report records which spec fields drive each file, and `lzctl explain` reads it | Accepted | 2026-10-08 |
+| [024](#adr-024-the-2-networking-stage-is-rendered-from-the-peering-dataset-with-a-fixed-cidr-plan) | The 2-networking stage is rendered from the peering dataset with a fixed CIDR plan | Accepted | 2026-10-08 |
 
 ---
 
@@ -378,6 +379,28 @@ A ruleset was used rather than classic branch protection: rulesets are GitHub's 
 - `explain` is as good as `sources`. A new template must declare its sources, or its findings come back `vendored` or `unknown`. The scanners' findings on HCL will need the same once HCL is rendered.
 - `sources` lives in the report, which `check` does not hash-protect, so a tampered report can mislead `explain`. It cannot hide a change from `check`, because integrity compares files against `files`, and the report is itself produced only by `render`. Report provenance (signing) belongs to the PR flow in P1.
 - A spec field that affects a file only indirectly (a default that changes with the profile) is not listed. The list names fields that reach a template.
+
+---
+
+## ADR-024: The 2-networking stage is rendered from the peering dataset with a fixed CIDR plan
+
+**Status:** Accepted · 2026-10-08 · Extends ADR-020
+
+**Context.** The spec's `network` block (topology, regions, `cidr_supernet`, `private_service_access`) and `extensions.gcp.hub_connectivity` were validated but not rendered. FAST's 2-networking stage ships four hub-and-spoke datasets, one per connectivity option (peering, VPN, NCC, NVA), and the spec's `hub_connectivity` values match them one to one. The upstream peering dataset is a working example, not a landing zone: it hard-codes CIDRs and regions, includes a VPN with `shared_secret: "mySecret"` and a placeholder interconnect, DNS forwarders to public resolvers, and example zones.
+
+**Decision.**
+- `tools/vendor_fast.py` also vendors the 2-networking `hub-and-spokes-peerings` dataset and that stage's schemas, unmodified, under `upstream/networking/`. The stage's schemas are kept apart because several names (`project`, `defaults`) differ from 0-org-setup's. `lzctl check` picks the schema directory by output path.
+- `lzctl render` emits `2-networking/datasets/landing-zone/**` and `2-networking/2-networking.auto.tfvars` when `topology` is `hub_spoke` and `hub_connectivity` is `peering` (the default). It produces a hub VPC and a project and spoke VPC per selected environment, peered to the hub, with Cloud NAT in every region and a deny-all ingress rule per spoke. Everything else comes from upstream. Stage-0 output and its hashes are unchanged.
+- **CIDR plan** (`plan_cidrs`, pure and deterministic). `cidr_supernet` splits into four fixed slots (hub, dev, stage, prod), each slot into 16 blocks. Region `i` in the spec's list gets block `i` (at most 8 regions, a spec finding beyond that), and its default subnet is the block's first /24. Block 15 holds the private service access range in spokes, at most a /20. Slots and blocks are fixed positions, so adding or dropping an environment, or appending a region, never renumbers an existing range. Reordering `regions` does renumber, because the first entry is the primary region and the order is meaningful.
+- **Dropped upstream demo content**, listed in `NETWORKING_DROPPED` and checked against the vendored tree so a baseline bump can't silently change it: the README, the VPN and VLAN attachments, the DNS forwarding zone and example zones, and the per-environment example VPCs, subnets and projects. The environment lists inside two kept DNS files (root peering zone, response policy) are patched in place and refused if upstream's shape changes.
+- Topologies and connectivity not rendered (`single`, `ncc`, `nva`, `vpn`) are listed in `not_rendered_yet` with the reason, as before. Hybrid connectivity (VPN, interconnect) is not in the spec and so is not rendered.
+
+**Consequences.**
+- A Standard spec now renders a complete networking stage that passes `lzctl check` against the stage's own schemas, and every file's spec fields are recorded for `lzctl explain`.
+- The rendered networking is data only, so Trivy and Checkov still have nothing to scan until HCL exists.
+- Equal slots make a /8 supernet generous and a /16 tight (a /22 block per region). That is predictable rather than efficient, and a custom plan needs a design change, not a hand edit.
+- Starter (`single`) renders no networking: upstream has no single-VPC dataset, and writing one is a separate decision.
+- Bumping FAST means re-vendoring both stages, checking `NETWORKING_DROPPED` and the DNS patches, and a full eval run.
 
 ---
 

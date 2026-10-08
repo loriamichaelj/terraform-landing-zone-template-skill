@@ -1,0 +1,32 @@
+# Rendered by lzctl from the landing zone spec. Edit the spec, not this file.
+
+# yaml-language-server: $schema=../../schemas/defaults.schema.json
+
+context:
+  cidr_ranges_sets:
+    healthchecks:
+      - 35.191.0.0/16
+      - 130.211.0.0/22
+      - 209.85.152.0/22
+      - 209.85.204.0/22
+    rfc1918:
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+  locations:
+    primary: {{ regions[0] }}
+{% if regions | length > 1 %}
+    secondary: {{ regions[1] }}
+{% endif %}
+  iam_principals: {}
+projects:
+  defaults:
+    locations:
+      storage: $locations:primary
+vpcs:
+  defaults:
+    auto_create_subnetworks: false
+    delete_default_routes_on_create: true
+    mtu: 1500
+output_files:
+  storage_bucket: $storage_buckets:iac-0/iac-outputs

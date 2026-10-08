@@ -134,14 +134,14 @@ $S explain /tmp/lz                                           # trace any finding
 python -m pytest tests                                       # unit and render tests
 ```
 
-`render` covers the hierarchy, environments and audit logging. Networking, security and the Regulated profile are not rendered yet, and every render lists the spec fields it left out (`not_rendered_yet`). See [ADR-020](docs/ADR.md#adr-020-gcp-output-is-a-vendored-fast-dataset-plus-overlay-templates).
+`render` covers the hierarchy, environments, audit logging and, for a hub-and-spoke spec with peering, the `2-networking` stage (a hub VPC, one spoke per environment and a deterministic CIDR plan). Security, the other hub connectivity options, the single-VPC topology and the Regulated profile are not rendered yet, and every render lists the spec fields it left out (`not_rendered_yet`). See [ADR-020](docs/ADR.md#adr-020-gcp-output-is-a-vendored-fast-dataset-plus-overlay-templates) and [ADR-024](docs/ADR.md#adr-024-the-2-networking-stage-is-rendered-from-the-peering-dataset-with-a-fixed-cidr-plan).
 
 ## 🗺️ Roadmap
 
-- [x] **Design:** architecture, spec schema, cost model, 23 ADRs
+- [x] **Design:** architecture, spec schema, cost model, 24 ADRs
 - [x] **CI foundation:** OIDC per GitHub environment, Terraform state, Secret Manager + KMS, environment folders
 - [x] **Community:** license, contributing guide, issue forms, Discussions, protected `dev` branch
-- [ ] **P0, core + GCP:** spec schema ✓, `lzctl` (validate, render, check, explain ✓), validator image, eval harness, FAST datasets (`0-org-setup` ✓; networking and security next)
+- [ ] **P0, core + GCP:** spec schema ✓, `lzctl` (validate, render, check, explain ✓), validator image, eval harness, FAST datasets (`0-org-setup` ✓, `2-networking` with peering ✓; security next)
 - [ ] **P1, hosted agent:** ADK 2.0 workflow on Cloud Run, PR flow, first pilot
 - [ ] **P2, Azure, AWS, hosts:** AVM ALZ and Control Tower/AFT baselines, host compatibility matrix
 - [ ] **P3, OpenStack + hardening:** OpenStack modules, sandbox plans, security review

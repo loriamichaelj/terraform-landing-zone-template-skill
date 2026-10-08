@@ -1,0 +1,28 @@
+# Rendered by lzctl from the landing zone spec. Edit the spec, not this file.
+
+# yaml-language-server: $schema=../../../../schemas/vpc.schema.json
+
+project_id: $project_ids:net-{{ env }}-0
+name: {{ env }}-0
+delete_default_routes_on_create: true
+mtu: 1500
+nat_config:
+{% for region in regions %}
+  nat-{{ region }}:
+    region: {{ region }}
+{% endfor %}
+peering_config:
+  to-hub:
+    peer_network: $networks:hub
+{% if psa_range %}
+psa_configs:
+  - ranges:
+      psa: {{ psa_range }}
+    export_routes: true
+    import_routes: true
+{% endif %}
+routes:
+  default:
+    dest_range: 0.0.0.0/0
+    next_hop_type: "gateway"
+    next_hop: "default-internet-gateway"

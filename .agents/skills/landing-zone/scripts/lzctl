@@ -35,8 +35,45 @@ EXIT_OK, EXIT_FINDINGS, EXIT_ERROR = 0, 1, 2
 # One pinned baseline per cloud per skill version. Bumping requires re-vendoring
 # (tools/vendor_fast.py), updating the overlays and a full eval run.
 BASELINES = {
-    "gcp": {"tag": "v59.0.0", "dir": "gcp/fast-v59.0.0", "dataset": "classic", "output_dataset": "landing-zone"},
+    "gcp": {
+        "tag": "v59.0.0",
+        "dir": "gcp/fast-v59.0.0",
+        "dataset": "classic",
+        "networking_dataset": "hub-and-spokes-peerings",
+        "output_dataset": "landing-zone",
+    },
 }
+
+# Rendered networking files live under this directory, next to the 0-org-setup output.
+NETWORKING_ROOT = "2-networking/"
+
+# CIDR plan (ADR-024): the supernet splits into four fixed slots, each slot into 16 blocks.
+# Fixed positions mean selecting or adding an environment or region never renumbers the others.
+NETWORK_SLOTS = {"hub": 0, "dev": 1, "stage": 2, "prod": 3}
+MAX_REGIONS = 8  # blocks 0 to 7 of a slot; block 15 is the private service access range
+PSA_BLOCK = 15
+
+# Upstream networking demo content the render drops or replaces, so no placeholder reaches a landing zone
+# (a fake VPN with a shared secret, a placeholder interconnect, DNS forwarders, example zones).
+NETWORKING_DROPPED = (
+    "README.md",
+    "defaults.yaml",
+    "dns/zones/net-core-0/fwd-root.yaml",
+    "dns/zones/net-core-0/pvt-test.yaml",
+    "dns/zones/net-dev-0/",
+    "dns/zones/net-prod-0/",
+    "projects/net-dev-0.yaml",
+    "projects/net-prod-0.yaml",
+    "vpcs/dev/",
+    "vpcs/prod/",
+    "vpcs/hub/.config.yaml",
+    "vpcs/hub/subnets/",
+    "vpcs/hub/vlan-attachments/",
+    "vpcs/hub/vpns/",
+)
+# Upstream files kept, with the environment list inside them replaced.
+PEER_ROOT_CLIENTS = "  client_networks:\n    - $networks:dev\n    - $networks:prod\n"
+RESPONSE_POLICY_NETWORKS = "networks:\n  - $networks:dev\n  - $networks:hub\n  - $networks:prod\n"
 
 # Canonical order, so output never depends on the order in the spec.
 ENVIRONMENTS = {
@@ -46,16 +83,14 @@ ENVIRONMENTS = {
 }
 
 # Spec fields the GCP renderer does not turn into configuration yet, with the stage that will.
+# The network fields are rendered when networking_support() says so, and listed here only when it does not.
+NETWORK_FIELDS = ("network.topology", "network.cidr_supernet", "network.private_service_access", "extensions.gcp.hub_connectivity")
 DEFERRED_GCP = {
-    "network.topology": "2-networking dataset",
-    "network.cidr_supernet": "2-networking dataset",
-    "network.private_service_access": "2-networking dataset",
-    "iam.groups.network_admins": "2-networking dataset",
+    "iam.groups.network_admins": "2-networking IAM",
     "iam.groups.security_admins": "2-security dataset",
     "security.service_perimeter": "1-vpcsc and the hardened dataset (regulated profile)",
     "security.customer_managed_keys": "2-security and the hardened dataset (regulated profile)",
     "security.compliance": "policy pack",
-    "extensions.gcp.hub_connectivity": "2-networking dataset",
     "extensions.gcp.audit_sink": "additional log sinks",
 }
 
@@ -140,6 +175,9 @@ def _semantic_findings(spec: dict) -> list[dict]:
     for path, value in _strings(spec):
         if any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
             findings.append(_finding("semantic.control_character", _dotted(path), "control characters are not allowed"))
+    regions = spec.get("network", {}).get("regions")
+    if isinstance(regions, list) and len(regions) > MAX_REGIONS:
+        findings.append(_finding("semantic.regions", "network.regions", f"at most {MAX_REGIONS} regions are supported"))
     cidr = spec.get("network", {}).get("cidr_supernet")
     if isinstance(cidr, str):
         try:
@@ -210,6 +248,96 @@ def _load_baseline(cloud: str) -> tuple[dict, Path]:
         if not path.is_file() or _sha256(path.read_bytes()) != expected:
             raise RenderError(f"vendored upstream file {relative} does not match MANIFEST.json; re-run tools/vendor_fast.py")
     return manifest, root
+
+
+def plan_cidrs(supernet: str, regions: list[str], environments: list[str], psa: bool) -> dict:
+    """Deterministic CIDR plan: {vpc: {"subnets": {region: cidr}, "psa": cidr or None}}.
+
+    Slots are fixed by name (hub, dev, stage, prod); within a slot, region i gets block i (its default
+    /24 is the block's first /24) and block 15 holds the private service access range (at most a /20).
+    """
+    slots = list(ipaddress.ip_network(supernet, strict=True).subnets(prefixlen_diff=2))
+    plan = {}
+    for name in ["hub", *[env for env in ENVIRONMENTS if env in environments]]:
+        blocks = list(slots[NETWORK_SLOTS[name]].subnets(prefixlen_diff=4))
+        psa_range = None
+        if psa and name != "hub":
+            psa_range = str(next(blocks[PSA_BLOCK].subnets(new_prefix=max(blocks[PSA_BLOCK].prefixlen, 20))))
+        plan[name] = {
+            "subnets": {region: str(next(blocks[i].subnets(new_prefix=24))) for i, region in enumerate(regions)},
+            "psa": psa_range,
+        }
+    return plan
+
+
+def networking_support(spec: dict) -> str | None:
+    """None when the networking stage can be rendered, otherwise why not."""
+    if spec["network"]["topology"] != "hub_spoke":
+        return "the single topology has no upstream dataset"
+    connectivity = spec["extensions"]["gcp"].get("hub_connectivity", "peering")
+    if connectivity != "peering":
+        return f"hub_connectivity {connectivity} needs the hub-and-spokes-{connectivity} dataset, which is not vendored"
+    return None
+
+
+def _render_networking(spec: dict, root: Path, manifest: dict, render, baseline: dict) -> tuple[dict[str, bytes], dict[str, list[str]]]:
+    """The 2-networking dataset: upstream hub-and-spokes-peerings with the spec-driven files replaced."""
+    upstream = root / "upstream" / "networking" / "datasets" / manifest["networking_dataset"]
+    files = {p.relative_to(upstream).as_posix(): p.read_bytes() for p in sorted(upstream.rglob("*")) if p.is_file()}
+    for dropped in NETWORKING_DROPPED:
+        matched = [path for path in files if path == dropped or (dropped.endswith("/") and path.startswith(dropped))]
+        if not matched:
+            raise RenderError(f"upstream networking file {dropped} is gone; update NETWORKING_DROPPED for the new baseline")
+        for path in matched:
+            del files[path]
+
+    environments = [env for env in ENVIRONMENTS if env in spec["hierarchy"]["environments"]]
+    regions = spec["network"]["regions"]
+    plan = plan_cidrs(spec["network"]["cidr_supernet"], regions, environments, bool(spec["network"].get("private_service_access")))
+    sources: dict[str, list[str]] = {}
+
+    def add(path: str, data: bytes, *fields: str) -> None:
+        files[path] = data
+        sources[path] = sorted(fields)
+
+    def subnet_files(vpc: str) -> None:
+        for index, region in enumerate(regions):
+            name = f"{vpc}-default" if index == 0 else f"{vpc}-default-{region}"
+            region_ref = "$locations:primary" if index == 0 else region
+            add(f"vpcs/{vpc}/subnets/{name}.yaml",
+                render("networking/subnet.yaml.j2", name=name, region=region_ref, cidr=plan[vpc]["subnets"][region], vpc=vpc),
+                "network.cidr_supernet", "network.regions")
+
+    add("defaults.yaml", render("networking/defaults.yaml.j2", regions=regions), "network.regions")
+    add("vpcs/hub/.config.yaml", render("networking/vpc-hub.yaml.j2", regions=regions, environments=environments),
+        "hierarchy.environments", "network.regions")
+    subnet_files("hub")
+    for env in environments:
+        add(f"projects/net-{env}-0.yaml", render("networking/project.yaml.j2", env=env), "hierarchy.environments")
+        add(f"vpcs/{env}/.config.yaml",
+            render("networking/vpc-spoke.yaml.j2", env=env, regions=regions, psa_range=plan[env]["psa"]),
+            "network.cidr_supernet", "network.private_service_access", "network.regions")
+        add(f"vpcs/{env}/firewall-rules/default-ingress.yaml", render("networking/firewall-rules-spoke.yaml.j2", env=env),
+            "hierarchy.environments")
+        subnet_files(env)
+
+    networks = "".join(f"    - $networks:{env}\n" for env in environments)
+    peer_root = files["dns/zones/net-core-0/peer-root.yaml"].decode("utf-8")
+    policy = files["dns/response-policies/net-core-0.yaml"].decode("utf-8")
+    if PEER_ROOT_CLIENTS not in peer_root or RESPONSE_POLICY_NETWORKS not in policy:
+        raise RenderError("upstream DNS files changed shape; update the networking patches for the new baseline")
+    add("dns/zones/net-core-0/peer-root.yaml",
+        peer_root.replace(PEER_ROOT_CLIENTS, "  client_networks:\n" + networks).encode("utf-8"), "hierarchy.environments")
+    add("dns/response-policies/net-core-0.yaml",
+        policy.replace(RESPONSE_POLICY_NETWORKS, "networks:\n  - $networks:hub\n" + networks.replace("    -", "  -")).encode("utf-8"),
+        "hierarchy.environments")
+
+    output = {NETWORKING_ROOT + f"datasets/{baseline['output_dataset']}/{path}": data for path, data in files.items()}
+    sources = {NETWORKING_ROOT + f"datasets/{baseline['output_dataset']}/{path}": fields for path, fields in sources.items()}
+    tfvars = NETWORKING_ROOT + "2-networking.auto.tfvars"
+    output[tfvars] = render("networking/tfvars.j2", baseline_tag=manifest["tag"], dataset_name=baseline["output_dataset"])
+    sources[tfvars] = ["target.baseline_version"]
+    return output, sources
 
 
 def render_spec(spec: dict) -> tuple[dict[str, bytes], dict]:
@@ -301,13 +429,21 @@ def render_spec(spec: dict) -> tuple[dict[str, bytes], dict]:
     output["0-org-setup.auto.tfvars"] = render(
         "factories.tfvars.j2", baseline_tag=manifest["tag"], dataset_name=baseline["output_dataset"]
     )
+    not_networking = networking_support(spec)
+    if not_networking is None:
+        net_files, net_sources = _render_networking(spec, root, manifest, render, baseline)
+        output.update(net_files)
+        sources.update(net_sources)
 
     digests = {path: _sha256(data) for path, data in sorted(output.items())}
     output_hash = _output_hash(digests)
     deferred = {field: stage for field, stage in DEFERRED_GCP.items() if _present(spec, field)}
-    extra_regions = spec["network"]["regions"][1:]
-    if extra_regions:
-        deferred["network.regions[1:]"] = "2-networking dataset"
+    if not_networking is not None:
+        for field in NETWORK_FIELDS:
+            if _present(spec, field):
+                deferred[field] = not_networking
+        if spec["network"]["regions"][1:]:
+            deferred["network.regions[1:]"] = not_networking
     report = {
         "baseline": {"cloud": cloud, "tag": manifest["tag"], "commit": manifest["commit"], "dataset": baseline["dataset"]},
         "output_hash": output_hash,
@@ -426,8 +562,9 @@ def _schema_check(report: dict, on_disk: dict[str, Path]) -> tuple[list[dict], i
         findings.append(_finding("check.baseline.mismatch", REPORT_NAME,
                                  f"rendered with {report['baseline'].get('tag')}, but this skill vendors {manifest['tag']}"))
 
-    schema_dir = root / "upstream" / "schemas"
-    cache: dict[str, object] = {}
+    # Each stage has its own schemas, and some names (project, defaults) differ between stages.
+    schema_dirs = {True: root / "upstream" / "networking" / "schemas", False: root / "upstream" / "schemas"}
+    cache: dict[tuple[bool, str], object] = {}
     validated = undeclared = 0
     for relative, path in sorted(on_disk.items()):
         if not relative.endswith((".yaml", ".yml")):
@@ -444,10 +581,11 @@ def _schema_check(report: dict, on_disk: dict[str, Path]) -> tuple[list[dict], i
             undeclared += 1
             continue
         name = declared.group(1).decode()
-        if name not in cache:
-            schema_path = schema_dir / name
-            cache[name] = _load_json(schema_path) if schema_path.is_file() else None
-        schema = cache[name]
+        networking = relative.startswith(NETWORKING_ROOT)
+        if (networking, name) not in cache:
+            schema_path = schema_dirs[networking] / name
+            cache[(networking, name)] = _load_json(schema_path) if schema_path.is_file() else None
+        schema = cache[(networking, name)]
         if schema is None:
             findings.append(_finding("check.schema.unknown", relative, f"declares {name}, which is not among the vendored schemas"))
             continue

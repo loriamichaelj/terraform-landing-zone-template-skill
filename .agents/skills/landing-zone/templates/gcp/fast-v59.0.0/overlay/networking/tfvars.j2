@@ -1,0 +1,6 @@
+# Rendered by lzctl from the landing zone spec.
+# Use with the FAST 2-networking stage ({{ baseline_tag }}): copy the dataset directory into
+# the stage's datasets/ folder, then apply this file.
+factories_config = {
+  dataset = "datasets/{{ dataset_name }}"
+}

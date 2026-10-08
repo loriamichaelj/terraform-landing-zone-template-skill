@@ -1,0 +1,19 @@
+# Rendered by lzctl from the landing zone spec. Edit the spec, not this file.
+
+# yaml-language-server: $schema=../../../schemas/project.schema.json
+
+name: {{ env }}-net-spoke-0
+parent: $folder_ids:networking/{{ env }}
+services:
+  - compute.googleapis.com
+  - container.googleapis.com
+  - dns.googleapis.com
+  - iap.googleapis.com
+  - logging.googleapis.com
+  - monitoring.googleapis.com
+  - networkmanagement.googleapis.com
+  - networksecurity.googleapis.com
+  - servicenetworking.googleapis.com
+  - vpcaccess.googleapis.com
+shared_vpc_host_config:
+  enabled: true

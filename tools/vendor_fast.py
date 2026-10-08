@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """Vendor a pinned Cloud Foundation Fabric FAST dataset and its schemas.
 
-Downloads fast/stages/0-org-setup/datasets/<dataset> and the stage's JSON schemas
-at one commit, and writes them unmodified under:
+Downloads, at one commit, the datasets and JSON schemas of the stages the skill renders,
+and writes them unmodified under:
 
   .agents/skills/landing-zone/templates/gcp/fast-<tag>/upstream/
+
+  datasets/<dataset>/, schemas/               from fast/stages/0-org-setup
+  networking/datasets/<dataset>/, networking/schemas/   from fast/stages/2-networking
 
 plus MANIFEST.json (tag, commit, per-file SHA-256). The overlay templates next to
 `upstream/` are written by hand; this tool never touches them.
 
-Usage: tools/vendor_fast.py <tag> <commit-sha> [--dataset classic]
+Usage: tools/vendor_fast.py <tag> <commit-sha> [--dataset classic] [--networking-dataset hub-and-spokes-peerings]
 Set GITHUB_TOKEN to avoid API rate limits.
 """
 
@@ -25,7 +28,8 @@ import urllib.request
 from pathlib import Path
 
 REPO = "GoogleCloudPlatform/cloud-foundation-fabric"
-STAGE = "fast/stages/0-org-setup"
+ORG_STAGE = "fast/stages/0-org-setup"
+NETWORKING_STAGE = "fast/stages/2-networking"
 ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES = ROOT / ".agents/skills/landing-zone/templates/gcp"
 
@@ -44,6 +48,7 @@ def main() -> int:
     parser.add_argument("tag")
     parser.add_argument("commit", help="full commit SHA the tag points to")
     parser.add_argument("--dataset", default="classic")
+    parser.add_argument("--networking-dataset", default="hub-and-spokes-peerings")
     args = parser.parse_args()
 
     tree = json.loads(_get(f"https://api.github.com/repos/{REPO}/git/trees/{args.commit}?recursive=1"))
@@ -51,17 +56,20 @@ def main() -> int:
         print("tree listing truncated", file=sys.stderr)
         return 2
 
-    dataset_prefix = f"{STAGE}/datasets/{args.dataset}/"
-    schema_prefix = f"{STAGE}/schemas/"
+    # (upstream stage, dataset, directory under upstream/ that receives it)
+    stages = [(ORG_STAGE, args.dataset, ""), (NETWORKING_STAGE, args.networking_dataset, "networking/")]
     wanted = {}
     for item in tree["tree"]:
         path = item["path"]
         if item["type"] != "blob":
             continue
-        if path.startswith(dataset_prefix):
-            wanted[path] = f"datasets/{args.dataset}/{path[len(dataset_prefix):]}"
-        elif path.startswith(schema_prefix) and path.endswith(".schema.json"):
-            wanted[path] = f"schemas/{path[len(schema_prefix):]}"
+        for stage, dataset, target in stages:
+            dataset_prefix = f"{stage}/datasets/{dataset}/"
+            schema_prefix = f"{stage}/schemas/"
+            if path.startswith(dataset_prefix):
+                wanted[path] = f"{target}datasets/{dataset}/{path[len(dataset_prefix):]}"
+            elif path.startswith(schema_prefix) and path.endswith(".schema.json"):
+                wanted[path] = f"{target}schemas/{path[len(schema_prefix):]}"
     wanted["LICENSE"] = "LICENSE"
     if len(wanted) < 10:
         print(f"suspiciously few files ({len(wanted)}); wrong commit or dataset?", file=sys.stderr)
@@ -86,6 +94,7 @@ def main() -> int:
         "commit": args.commit,
         "license": "Apache-2.0",
         "dataset": args.dataset,
+        "networking_dataset": args.networking_dataset,
         "files": files,
     }
     (out / "MANIFEST.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")

@@ -8,6 +8,7 @@ A portable **Agent Skill** plus a hosted **ADK agent on Cloud Run** that turns l
 
 [![Status: P0 in progress](https://img.shields.io/badge/status-P0%20in%20progress-orange?style=for-the-badge)](docs/DESIGN.md#delivery-plan-and-milestones)
 [![License: Apache-2.0](https://img.shields.io/github/license/loriamichaelj/terraform-landing-zone-template-skill?style=for-the-badge&color=blue)](LICENSE)
+[![CI: Skill](https://img.shields.io/github/actions/workflow/status/loriamichaelj/terraform-landing-zone-template-skill/ci-skill.yml?branch=dev&style=for-the-badge&label=CI%3A%20Skill&logo=githubactions&logoColor=white)](https://github.com/loriamichaelj/terraform-landing-zone-template-skill/actions/workflows/ci-skill.yml)
 [![Ops: OIDC check](https://img.shields.io/github/actions/workflow/status/loriamichaelj/terraform-landing-zone-template-skill/ops-oidc-check.yml?branch=dev&style=for-the-badge&label=OIDC%20check&logo=githubactions&logoColor=white)](https://github.com/loriamichaelj/terraform-landing-zone-template-skill/actions/workflows/ops-oidc-check.yml)
 
 [![Terraform](https://img.shields.io/badge/Terraform-1.16-844FBA?logo=terraform&logoColor=white)](https://developer.hashicorp.com/terraform)

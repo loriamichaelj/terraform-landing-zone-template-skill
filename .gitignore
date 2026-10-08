@@ -37,3 +37,6 @@ __pycache__/
 .venv/
 
 !evals/**/*.tfvars
+
+# Release zip built by tools/build_skill_zip.py
+dist/

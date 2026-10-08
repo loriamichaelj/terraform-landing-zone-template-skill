@@ -1,6 +1,7 @@
 ---
 name: landing-zone
-description: Turn landing zone requirements into a validated, schema-checked spec for GCP (Azure, AWS and OpenStack follow). Use when someone wants to design, scope or configure a cloud landing zone, organization hierarchy, hub-and-spoke network, audit logging or guardrails.
+description: Turn landing zone requirements into a validated GCP spec and rendered config. Use to design or configure a cloud landing zone, org hierarchy, hub-and-spoke network, audit logging or guardrails.
+compatibility: Needs Python 3.11+ with jsonschema, jinja2 and PyYAML. Full checks also need Terraform or OpenTofu, tflint, trivy, checkov and conftest; without them those checks report not_applicable.
 ---
 
 # Landing zone

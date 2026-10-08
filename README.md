@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🏗️ Terraform Landing Zone Template Skill
+# 🏗️ Terraform Landing Zone Agent Skill
 
 ### The goal: from a requirements conversation to a review-ready landing zone PR.
 

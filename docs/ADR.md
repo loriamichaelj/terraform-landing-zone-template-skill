@@ -26,6 +26,7 @@ Statuses: **Proposed** (in the design, awaiting reviewer sign-off) · **Accepted
 | [016](#adr-016-open-to-contributors-under-apache-20) | Open to contributors under Apache-2.0 | Accepted | 2026-10-07 |
 | [017](#adr-017-environment-folders-and-the-environment-tag) | Environment folders and the environment tag | Accepted | 2026-10-07 |
 | [018](#adr-018-dev-accepts-changes-only-by-pull-request-except-the-owner) | `dev` accepts changes only by pull request, except the owner | Accepted | 2026-10-07 |
+| [019](#adr-019-every-taggable-resource-carries-both-the-name-and-environment-tags) | Every taggable resource carries both the name and environment tags | Accepted | 2026-10-07 |
 
 ---
 
@@ -269,6 +270,23 @@ A ruleset was used rather than classic branch protection: rulesets are GitHub's 
 - Anything acting with the owner's credentials (a local `gh` session, a personal access token, automation running as the owner) bypasses too. Bots such as Dependabot don't, and must go through pull requests.
 - No required status checks yet, because no PR workflows exist. Add CI: Docs and CI: Workflows to this ruleset when they land (CICD.md).
 - The owner can still force-push to `dev` through the bypass, as was done for the history rewrite earlier. That's deliberate but should stay rare; anyone else with a clone has to reset after a force-push.
+
+## ADR-019: Every taggable resource carries both the name and environment tags
+
+**Status:** Accepted · 2026-10-07 · Requested by the project owner · Extends ADR-012 and ADR-017
+
+**Context.** ADR-012 requires the `name` tag on every resource this repo creates, and ADR-017 puts the `environment` tag on folders and projects only. A check on 2026-10-07 showed the project carried both, but the state bucket and the `tlz` key ring carried only `name`. They inherit `environment:dev` from the project, but an inherited tag doesn't show in a per-resource audit and is lost if the resource moves. The owner asked that resources be tagged with both `environment:dev` and `name:Terraform-Landing-Zone-Template-Skill`.
+
+**Decision.**
+- Bind both tags explicitly on every taggable resource this repo creates: `skills-mjl-27850/name/Terraform-Landing-Zone-Template-Skill` (`tagValues/281477778372023`) and `618554946741/environment/<env>` (`dev` is `tagValues/281477792549021`). The environment value matches the environment the resource is deployed to.
+- Bound on 2026-10-07: `environment:dev` on `gs://skills-mjl-27850-tlz-tfstate` and on key ring `tlz`.
+- The conftest rule on the `infra/` plan (ADR-012) checks for both bindings.
+- Resource types that can't carry tags are exempt: service accounts (`lz-bootstrap-sa`, `lz-dev-sa`), the Workload Identity pool and provider, KMS keys, and enabled APIs. Their key ring, project and bindings carry the tags instead. Secrets created later must be tagged at creation.
+
+**Consequences.**
+- Terraform needs two binding resources per tagged resource, or two entries in a resource's own `tags` argument where the provider supports it.
+- The deploying identities need `roles/resourcemanager.tagUser` on the `environment` value as well as on the `name` value.
+- Which resource types accept tags depends on the service, so the exemption list is checked against Google's tag-supported-resources list when `infra/` is written.
 
 ---
 

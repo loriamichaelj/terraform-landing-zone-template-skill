@@ -320,7 +320,8 @@ Every resource this repository creates carries the resource manager tag `skills-
 
 - The tag key is parented by project `skills-mjl-27850`, but it also binds to resources elsewhere in `mikejloria-org`: the `dev`, `stage` and `prod` folders carry it (checked 2026-10-07). Resources in a different organization (such as P3 sandboxes) need their own tag key.
 - In `infra/`, look the value up once and bind it on every resource: use the resource's own `tags` argument where the provider supports it, otherwise `google_tags_location_tag_binding` (regional resources such as Cloud Run, Cloud Storage and Firestore) or `google_tags_tag_binding` (global resources).
-- A conftest rule on the `infra/` plan fails CI if any taggable resource has no binding to this value.
+- Each resource also carries the `environment` tag for the environment it is deployed to (`618554946741/environment/dev`, `tagValues/281477792549021`), bound the same way and per ADR-019. Service accounts, the Workload Identity pool and provider, KMS keys and enabled APIs can't be tagged.
+- A conftest rule on the `infra/` plan fails CI if any taggable resource has no binding to the name value or to its environment value.
 - The tag applies only to this repo's own platform, not to landing zones the agent generates for users.
 
 ```hcl

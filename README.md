@@ -165,7 +165,7 @@ Each environment has `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`, `T
 gh workflow run ops-oidc-check.yml -f environment=dev
 ```
 
-**Conventions:** every resource this repo creates carries the tag `skills-mjl-27850/name/Terraform-Landing-Zone-Template-Skill` ([ADR-012](docs/ADR.md#adr-012-tag-every-resource-this-repo-creates)); folders and projects also carry the org-level `environment` tag ([ADR-017](docs/ADR.md#adr-017-environment-folders-and-the-environment-tag)). `dev` accepts changes only through reviewed pull requests; only the repo admin can push directly ([ADR-018](docs/ADR.md#adr-018-dev-accepts-changes-only-by-pull-request-except-the-owner)).
+**Conventions:** every resource this repo creates carries the tag `skills-mjl-27850/name/Terraform-Landing-Zone-Template-Skill` ([ADR-012](docs/ADR.md#adr-012-tag-every-resource-this-repo-creates)); folders, projects and every taggable resource also carry the org-level `environment` tag ([ADR-017](docs/ADR.md#adr-017-environment-folders-and-the-environment-tag), [ADR-019](docs/ADR.md#adr-019-every-taggable-resource-carries-both-the-name-and-environment-tags)). `dev` accepts changes only through reviewed pull requests; only the repo admin can push directly ([ADR-018](docs/ADR.md#adr-018-dev-accepts-changes-only-by-pull-request-except-the-owner)).
 
 </details>
 

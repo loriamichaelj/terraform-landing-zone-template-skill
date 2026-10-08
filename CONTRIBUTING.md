@@ -6,7 +6,7 @@ By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Project status
 
-The project is early in **P0** (core and GCP). The repo holds the design ([docs/DESIGN.md](docs/DESIGN.md)), decision records ([docs/ADR.md](docs/ADR.md)), the CI/CD strategy ([docs/CICD.md](docs/CICD.md)), the CI plumbing, and the first slice of the skill: spec schemas, `lzctl spec validate` and `render` for the GCP `0-org-setup` dataset, and tests. `lzctl check`, the networking and security datasets, the hosted agent and the other clouds aren't written yet.
+The project is early in **P0** (core and GCP). The repo holds the design ([docs/DESIGN.md](docs/DESIGN.md)), decision records ([docs/ADR.md](docs/ADR.md)), the CI/CD strategy ([docs/CICD.md](docs/CICD.md)), the CI plumbing, and the skill: spec schemas, `lzctl` (`spec validate`, `render`, `check`, `explain`, `doctor`), the GCP `0-org-setup` and `2-networking` datasets, a conftest policy pack, a release zip build, and tests. The security dataset, the hosted agent and the other clouds aren't written yet.
 
 The most useful contributions right now:
 
@@ -79,7 +79,7 @@ Contributions are Markdown, workflow YAML, and now the skill and `lzctl`. Useful
 - [actionlint](https://github.com/rhysd/actionlint) for workflow changes
 - A Markdown previewer that renders Mermaid (for the architecture diagram)
 
-`lzctl doctor` checks the runtime dependencies. Terraform 1.16 (or OpenTofu), tflint, trivy, checkov and conftest are optional today and become required as `lzctl check` gains work for them: `check` runs `terraform fmt` when it is installed, and runs trivy and checkov on rendered `.tf` files once there are any, and reports the others `not_applicable` until HCL and policies are rendered.
+`lzctl doctor` checks the runtime dependencies. Terraform 1.16 (or OpenTofu), tflint, trivy, checkov and conftest are optional today and become required as `lzctl check` gains work for them: `check` runs `terraform fmt` when it is installed, runs the conftest policy pack over the rendered YAML, and runs trivy and checkov on rendered `.tf` files once there are any. It reports `terraform validate` and tflint `not_applicable` until HCL is rendered.
 
 **Changing the skill:**
 

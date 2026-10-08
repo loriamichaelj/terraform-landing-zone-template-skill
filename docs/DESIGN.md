@@ -135,7 +135,7 @@ templates/<cloud>/fast-<tag>/   # per baseline (ADR-020):
   upstream/               #   verbatim pinned copy: dataset, JSON schemas, license
   overlay/                #   Jinja templates that replace or add spec-driven files
   MANIFEST.json           #   tag, commit and SHA-256 of every upstream file
-policies/<cloud>/         # Rego rules used by conftest (not written yet)
+policies/<cloud>/         # Rego rules used by conftest (policies/gcp/landing_zone.rego, ADR-028)
 scripts/lzctl             # spec validate, render, check, explain, doctor
 ```
 
@@ -259,8 +259,8 @@ One skill directory runs unchanged in Codex, Gemini CLI and Grok Build, because 
 | Command | Does |
 | --- | --- |
 | `lzctl spec validate` | Checks the spec against the per-cloud JSON schema |
-| `lzctl render <spec> --out <dir>` | Renders a spec to YAML datasets and tfvars, plus a report with file hashes and the fields not rendered yet |
-| `lzctl check <dir>` | Verifies a rendered directory and emits JSON findings. Today: file integrity against the render report, upstream schema checks and `terraform fmt`. Trivy and Checkov scan rendered `.tf` files and are `not_applicable` until some exist (ADR-022). Validate, tflint and conftest are `not_applicable` until HCL and a policy pack are rendered (ADR-021) |
+| `lzctl render <spec> --out <dir>` | Renders a spec to YAML datasets and tfvars, a `README.md` and a `decision-log.md`, plus a report with file hashes and the fields not rendered yet (ADR-028) |
+| `lzctl check <dir>` | Verifies a rendered directory and emits JSON findings. Today: file integrity against the render report, upstream schema checks, `terraform fmt` and the conftest policy pack over the rendered YAML (ADR-028). Trivy and Checkov scan rendered `.tf` files and are `not_applicable` until some exist (ADR-022). Validate and tflint are `not_applicable` until HCL is rendered (ADR-021). `--write-report` writes `validation-report.md` into the directory |
 | `lzctl explain [dir] [--findings file]` | Maps findings from `check` or `spec validate` back to the spec fields that caused them, using the `sources` map in the render report. A finding on a hand-edited file is blamed on the edit, and one on an untouched upstream file is not blamed on the spec (ADR-023) |
 | `lzctl doctor` | Checks runtime dependencies and, for OpenStack, discovers available services |
 
@@ -501,7 +501,7 @@ The MVP is P0 plus a release, ending at G1 (ADR-027). The hosted agent (P1) is t
 | GCP; Standard profile as the gate, Starter as far as it renders | Regulated profile, `1-vpcsc`, `2-security`, `hardened` dataset |
 | `0-org-setup` and `2-networking` (hub-and-spoke over peering), already rendered | `ncc`, `nva`, `vpn`, and Starter's `single` network unless rendered |
 | `lzctl` spec validate, render, check, explain, doctor, run locally | Hosted agent, validator job, `infra/`, Firestore, BigQuery audit, Model Armor, the spend meter |
-| conftest policy pack and tflint config, so `check` has no `not_applicable` on the golden renders | GitHub App and the PR flow (F7, F8); the user opens the PR |
+| conftest policy pack over the rendered YAML (ADR-028; `terraform validate` and tflint need HCL, see the open question) | GitHub App and the PR flow (F7, F8); the user opens the PR |
 | README, validation report and decision log in the output directory | Azure, AWS, OpenStack, and hosts beyond the first two |
 | Two delivery paths: use the skill from the repository, or upload the `skill-v*` release `.zip` (with SHA-256) to an AI platform; install notes per host | Prometheus and Grafana (ADR-025) |
 | One certified host (proposed: Gemini CLI), on-demand intake eval | Scheduled model evals |
@@ -509,7 +509,7 @@ The MVP is P0 plus a release, ending at G1 (ADR-027). The hosted agent (P1) is t
 **Exit criteria for G1**
 
 1. The Starter and Standard golden specs render byte-identically on Python 3.11 and 3.13.
-2. `lzctl check` reports no critical findings and no `not_applicable` for validate, tflint and conftest on the Standard golden render.
+2. `lzctl check` reports no findings, and conftest passes rather than being skipped or `not_applicable`, on the Standard golden render. (ADR-027 also asked for `terraform validate` and tflint to run; they cannot until HCL is rendered, so this criterion is an open decision, see the open questions and ADR-028.)
 3. One person who did not build it takes a real requirements conversation to a rendered, checked output directory in under an hour on the certified host.
 4. The checked-out repository works as a skill in the certified host, and the release `.zip` extracts on a clean machine with `scripts/lzctl` still executable and `lzctl doctor` passing. The same tag rebuilds to the same checksum.
 
@@ -623,6 +623,7 @@ The GCP baseline choice blocks P0 and should be decided first. The MVP questions
 - [ ] **Regulated profile on GCP:** is SCC Premium or Enterprise available? The FAST `hardened` dataset's detective controls depend on it.
 - [ ] **Loaded rate:** confirm the $120/hour assumption used in the build estimate.
 - [ ] **Interface for the hosted agent:** CLI, Slack, or Gemini Enterprise?
+- [ ] **`terraform validate` and tflint in the MVP:** a render has no HCL, so both are `not_applicable`. Vendor the FAST stage HCL and a module mirror so they can run, or amend G1 criterion 2 so conftest is required and validate and tflint arrive with the validator in P1 (ADR-028)?
 - [ ] **MVP host:** certify Gemini CLI first (proposed in ADR-027) and Codex second, or start elsewhere?
 - [ ] **MVP profiles:** is Standard plus as much of Starter as renders enough for the first user, or does the first user need Regulated?
 - [ ] **Starter's network:** render the `single` topology before G1, or ship Starter with the network listed in `not_rendered_yet`?

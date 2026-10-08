@@ -35,6 +35,7 @@ Statuses: **Proposed** (in the design, awaiting reviewer sign-off) · **Accepted
 | [025](#adr-025-prometheus-metrics-and-grafana-dashboards-for-the-agent-platform) | Prometheus metrics and Grafana dashboards for the agent platform | Proposed | 2026-10-08 |
 | [026](#adr-026-this-platform-is-deployed-in-dev-only-and-defaults-are-chosen-for-minimum-cost) | This platform is deployed in dev only, and defaults are chosen for minimum cost | Proposed | 2026-10-08 |
 | [027](#adr-027-the-mvp-is-a-local-gcp-skill-that-ends-at-gate-g1) | The MVP is a local GCP skill that ends at gate G1 | Proposed | 2026-10-08 |
+| [028](#adr-028-the-policy-pack-readme-decision-log-and-validation-report) | The policy pack, README, decision log and validation report | Proposed | 2026-10-08 |
 
 ---
 
@@ -516,6 +517,38 @@ A ruleset was used rather than classic branch protection: rulesets are GitHub's 
 
 ---
 
+## ADR-028: The policy pack, README, decision log and validation report
+
+**Status:** Proposed · 2026-10-08 · Part of the MVP (ADR-027) · Amends ADR-021, which listed conftest as `not_applicable` until a policy pack exists
+
+**Context.** ADR-027 needs a reviewer to get, with the rendered configuration, a README, a validation report and a decision log, and needs `lzctl check` to stop reporting conftest as having nothing to run. A render is YAML datasets and tfvars; it has no HCL (the FAST stage code is not vendored). Conftest evaluates structured files, YAML included, so a policy pack can run on the render as it is. `terraform validate` and tflint need Terraform files and, for validate, the stage's modules and providers, which is a larger decision than the MVP's.
+
+**Decision.**
+- **Policy pack.** `.agents/skills/landing-zone/policies/gcp/landing_zone.rego`, run by `lzctl check` as `conftest test --combine --parser yaml` over `datasets/` and `2-networking/datasets/`. Each rule has a stable id, and a failure becomes a finding `check.conftest.<id>` on the file at fault, so `lzctl explain` can trace it. The rules back up the vendored baseline and the overlay: they fail a render if a baseline bump or a spec value weakens a guardrail.
+  - `LZ-ORG-001`: nine named org policy constraints (OS Login, no default network, serial port, service account key creation and upload, public SQL, public access prevention, uniform bucket access, secure transport) stay enforced unconditionally.
+  - `LZ-LOG-001`: every log bucket keeps logs at least 30 days.
+  - `LZ-NET-001`, `LZ-NET-002`: every subnet and private service range is RFC 1918, and no two ranges overlap.
+  - `LZ-NET-003`: no firewall rule or policy allows non-ICMP ingress from `0.0.0.0/0`.
+  - `LZ-NET-004`: every VPC keeps a deny-all ingress rule at priority 65535.
+  - `LZ-IAM-001`: `allUsers` and `allAuthenticatedUsers` appear nowhere.
+- **Statuses.** `conftest` is `skipped` when it is not installed or when some YAML does not parse (the parse finding already says why), and `not_applicable` when the cloud has no pack or the render has no YAML. A test requires every rule id in the pack to be exercised by a test.
+- **README and decision log are rendered files.** They come from overlay templates, appear in the render report with the other files, and are covered by the integrity check and the golden hashes. They are deterministic. Decision text is free text, so every value is escaped for markdown tables and code spans.
+- **Validation report.** `lzctl check --write-report` writes `validation-report.md` into the directory. It is not part of the render, because it depends on which tools are installed, so the integrity check ignores that one file. It states the output hash, each check's status, the findings, and which checks did not run, and it says the output is not fully validated whenever one did not. It has no timestamp, so the same result gives the same file.
+
+**Alternatives considered.**
+- *Policy in Python inside `lzctl`.* No new tool, but Rego with conftest is how the rest of this repo's policy is planned (CICD.md, the `infra/` rules), and it is reusable by the validator job.
+- *Put the validation report in the render.* It would make the render depend on the machine and break byte-identical output.
+- *Vendor the FAST stage HCL and modules now, to get `terraform validate` and tflint.* It adds the stage and module trees, needs provider downloads and a network at check time or a mirror, and is the validator image's job (ADR-008). Not done for the MVP.
+
+**Consequences.**
+- Conftest becomes a dependency of the full check. CI installs a pinned, checksum-verified build (0.71.1).
+- `terraform-validate` and `tflint` stay `not_applicable`. ADR-027's criterion 2 asks for neither to be `not_applicable`, so as written it cannot be met until the stage HCL is vendored. This is an open decision (DESIGN.md open questions): vendor the HCL for the MVP, or amend the criterion so conftest is required and validate and tflint move to P1 with the validator.
+- A hand-written `validation-report.md` is not integrity-protected. It records the output hash it describes, and `lzctl check` reproduces it.
+- Rules are provisional. A baseline bump needs a review of the pack, and a rule that blocks a legitimate configuration is a bug in the rule.
+- The pack has no Regulated rules yet (`1-vpcsc`, `2-security` and the hardened dataset are not rendered).
+
+---
+
 ## Review log
 
 ### 2026-10-07: First review and verification of DESIGN.md
@@ -603,6 +636,7 @@ A ruleset was used rather than classic branch protection: rulesets are GitHub's 
 | Dev-only deployment, cost defaults and the $20 a month cap | 026 |
 | $20 monthly billing budget with alerts, scoped to this project, and the billing export to BigQuery (the only controls built so far) | 026 |
 | MVP scoped as a local GCP skill ending at G1, with the hosted agent as the next release | 027 |
+| Conftest policy pack, rendered README and decision log, and the validation report | 028 |
 
 **Corrections found along the way**
 
@@ -616,3 +650,4 @@ A ruleset was used rather than classic branch protection: rulesets are GitHub's 
 | 32 | The $1 to $3 a month estimate for Prometheus and Grafana assumed the sidecar adds almost no cost, but it scrapes between requests, when a request-billed Cloud Run service throttles CPU | Added to ADR-025's spike list; the estimate is marked unverified until the spike runs |
 | 33 | The MVP was defined as P0 plus P1, which put the whole hosted platform in front of the first user. A check of the profile mapping also showed `2-security` belongs to Regulated only, and that Starter's `single` network topology is not rendered | MVP redefined as P0 plus a release, ending at G1 (ADR-027); Starter's network is disclosed in `not_rendered_yet` unless rendered |
 | 34 | `SKILL.md`'s description was 262 characters (one platform is reported to cap it at 200), had no `compatibility` field, and the zip layout was left ambiguous. The first rewrite also put a colon and a space in the description, which made the frontmatter invalid YAML; the new tests caught it before any commit | Description shortened to under 200 characters, `compatibility` added, zip layout fixed as a top-level `landing-zone/` folder, and `tests/test_skill_zip.py` plus `tools/build_skill_zip.py` added (ADR-027) |
+| 35 | ADR-027's criterion 2 asked for no `not_applicable` on `terraform-validate` and tflint, but a render has no HCL, so neither has anything to run; only conftest can run on the YAML. Conftest also errored on unparsable YAML, duplicating the parse finding | Policy pack built for conftest; the policy check skips itself when YAML does not parse; validate and tflint stay `not_applicable` and the criterion is an open decision (ADR-028) |
